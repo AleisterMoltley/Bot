@@ -1,0 +1,12 @@
+{
+  "deploy": {
+    "region": "europe-west4-drams3a",
+    "startCommand": "python -m uvicorn src.polybot.main_fastapi:app --host 0.0.0.0 --port 8000"
+  },
+  "crons": [
+    {
+      "schedule": "*/10 * * * *",
+      "command": "python -m polybot.redeem_all"
+    }
+  ]
+}

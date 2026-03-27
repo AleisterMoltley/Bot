@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # Backend - FastAPI (Python) - Pure API server
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - DASHBOARD_PORT=8000
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - .env
+    volumes:
+      - ./src:/app/src
+      - polybot_data:/app/data
+    depends_on:
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    command: ["uvicorn", "polybot.main_fastapi:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  # Redis - For execution logs and caching
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Frontend - Next.js
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      # In Docker Compose, use internal network name
+      # Override with NEXT_PUBLIC_API_URL for external deployments
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://backend:8000}
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  polybot_data:
+  redis_data:

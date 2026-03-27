@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+
+{% block title %}PolyBot Dashboard - Overview{% endblock %}
+
+{% block content %}
+<!-- 5-Minute Mode Banner -->
+<div class="card" style="background: linear-gradient(135deg, #059669 0%, #10B981 100%); border: none; margin-bottom: 1rem;">
+    <div style="text-align: center; padding: 1rem;">
+        <h2 style="color: white; margin: 0; font-size: 1.5rem;">⚡ Only 5-Minute Events Mode ACTIVE ⚡</h2>
+        <p style="color: rgba(255,255,255,0.9); margin: 0.5rem 0 0 0; font-size: 0.95rem;">
+            🚀 Maximum Turnover — EXCLUSIVE 5-minute crypto markets only (BTC, ETH, SOL, XRP)
+        </p>
+    </div>
+</div>
+
+<!-- Control Buttons -->
+<div class="card">
+    <h2>⚡ Quick Controls</h2>
+    <div class="controls-section">
+        <button id="trendFilterBtn" class="control-btn btn-primary" onclick="toggleTrendFilter(this)">
+            📊 Simple Trend Mode ON
+        </button>
+        <button id="pyramidBtn" class="control-btn btn-secondary" onclick="togglePyramid(this)">
+            🔺 Pyramid Mode ON
+        </button>
+        <button id="whaleBtn" class="control-btn btn-secondary" onclick="toggleWhale(this)">
+            🐋 Whale Copy ON
+        </button>
+        <button class="control-btn btn-secondary" onclick="runScan()">
+            🔍 Run Scan
+        </button>
+    </div>
+</div>
+
+<div class="grid">
+    <div class="card">
+        <h2>🛡️ Risk State</h2>
+        <div class="stat-grid">
+            <div class="stat">
+                <div class="stat-value {% if risk.is_paused %}negative{% else %}positive{% endif %}">
+                    <span class="status-dot {% if risk.is_paused %}status-paused{% else %}status-active{% endif %}"></span>
+                    {{ 'PAUSED' if risk.is_paused else 'ACTIVE' }}
+                </div>
+                <div class="stat-label">Status</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value {% if risk.daily_loss > 0 %}negative{% endif %}">
+                    ${{ "%.2f"|format(risk.daily_loss or 0) }}
+                </div>
+                <div class="stat-label">Daily Loss</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value {% if risk.consecutive_losses >= 3 %}warning{% endif %}">
+                    {{ risk.consecutive_losses or 0 }}
+                </div>
+                <div class="stat-label">Consecutive Losses</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>📈 Today's P&L</h2>
+        <div class="stat-grid">
+            <div class="stat">
+                <div class="stat-value {{ 'positive' if pnl.realized >= 0 else 'negative' }}">
+                    {{ '+' if pnl.realized >= 0 else '' }}${{ "%.2f"|format(pnl.realized or 0) }}
+                </div>
+                <div class="stat-label">Realized</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value {{ 'positive' if pnl.unrealized >= 0 else 'negative' }}">
+                    {{ '+' if pnl.unrealized >= 0 else '' }}${{ "%.2f"|format(pnl.unrealized or 0) }}
+                </div>
+                <div class="stat-label">Unrealized</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{{ pnl.total_trades or 0 }}</div>
+                <div class="stat-label">Trades</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value {% if pnl.winrate >= 50 %}positive{% elif pnl.winrate < 40 %}negative{% endif %}">
+                    {{ "%.1f"|format(pnl.winrate or 0) }}%
+                </div>
+                <div class="stat-label">Win Rate</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>📊 Recent Trades</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Mode</th>
+                <th>Side</th>
+                <th>Cost</th>
+                <th>P&L</th>
+                <th>Market</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for trade in trades %}
+            <tr>
+                <td>{{ trade.timestamp[:19] }}</td>
+                <td>{{ trade.mode }}</td>
+                <td><span class="badge {{ 'badge-buy' if trade.side == 'BUY' else 'badge-sell' }}">{{ trade.side }}</span></td>
+                <td>${{ "%.2f"|format(trade.cost) }}</td>
+                <td class="{{ 'positive' if trade.profit >= 0 else 'negative' }}">
+                    {{ '+' if trade.profit >= 0 else '' }}${{ "%.2f"|format(trade.profit or 0) }}
+                </td>
+                <td title="{{ trade.market_title or '-' }}">{{ (trade.market_title or '-')[:50] }}{{ '...' if (trade.market_title or '')|length > 50 else '' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6" style="text-align: center; color: var(--text-secondary);">No trades yet</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="grid">
+    <div class="card">
+        <h2>📋 Open Positions</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Market</th>
+                    <th>Side</th>
+                    <th>Size</th>
+                    <th>Unrealized</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for pos in positions %}
+                <tr>
+                    <td title="{{ pos.market_title or '-' }}">{{ (pos.market_title or '-')[:35] }}{{ '...' if (pos.market_title or '')|length > 35 else '' }}</td>
+                    <td><span class="badge {{ 'badge-buy' if pos.side == 'YES' else 'badge-sell' }}">{{ pos.side }}</span></td>
+                    <td>{{ "%.2f"|format(pos.size) }}</td>
+                    <td class="{{ 'positive' if pos.unrealized_pnl >= 0 else 'negative' }}">
+                        {{ '+' if pos.unrealized_pnl >= 0 else '' }}${{ "%.2f"|format(pos.unrealized_pnl or 0) }}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4" style="text-align: center; color: var(--text-secondary);">No open positions</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>⚡ Recent Arbitrage</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Market</th>
+                    <th>Profit</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for arb in arb_executions %}
+                <tr>
+                    <td>{{ arb.timestamp[:16] }}</td>
+                    <td title="{{ arb.market }}">{{ arb.market[:25] }}{{ '...' if arb.market|length > 25 else '' }}</td>
+                    <td class="positive">${{ "%.2f"|format(arb.profit or 0) }}</td>
+                    <td><span class="badge {{ 'badge-open' if arb.status == 'PENDING' else 'badge-closed' }}">{{ arb.status }}</span></td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4" style="text-align: center; color: var(--text-secondary);">No arbitrage executions</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

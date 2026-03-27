@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "polybot"
+version = "2.0.0"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "pydantic-settings",
+    "requests",
+    "ccxt",
+    "pytz",
+    "typer",
+    "rich",
+    "tenacity>=8.2.0",
+    "structlog>=24.1",
+    "httpx[http2,socks]>=0.27",
+    "sqlmodel>=0.0.16",
+    "numpy>=1.24",
+    "web3>=6.15",
+    "py-clob-client==0.34.6",
+    "optuna>=3.6.0",
+    "plotly>=5.24.0",
+    "kaleido>=0.2.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "pytest-asyncio>=0.23",
+    "pytest-timeout>=2.0",
+    "pandas>=2.0",
+]
+
+[project.scripts]
+polybot = "polybot.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

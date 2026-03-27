@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}PolyBot Dashboard - Positions{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>📋 Open Positions</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Opened</th>
+                <th>Market</th>
+                <th>Side</th>
+                <th>Size</th>
+                <th>Avg Price</th>
+                <th>Cost Basis</th>
+                <th>Current</th>
+                <th>Unrealized P&L</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for pos in open_positions %}
+            <tr>
+                <td>#{{ pos.id }}</td>
+                <td>{{ pos.opened_at[:16] }}</td>
+                <td title="{{ pos.market_title or '-' }}">{{ (pos.market_title or '-')[:35] }}{{ '...' if (pos.market_title or '')|length > 35 else '' }}</td>
+                <td><span class="badge {{ 'badge-buy' if pos.side == 'YES' else 'badge-sell' }}">{{ pos.side }}</span></td>
+                <td>{{ "%.2f"|format(pos.size) }}</td>
+                <td>${{ "%.4f"|format(pos.avg_price) }}</td>
+                <td>${{ "%.2f"|format(pos.cost_basis) }}</td>
+                <td>${{ "%.4f"|format(pos.current_price) }}</td>
+                <td class="{{ 'positive' if pos.unrealized_pnl >= 0 else 'negative' }}">
+                    {{ '+' if pos.unrealized_pnl >= 0 else '' }}${{ "%.2f"|format(pos.unrealized_pnl or 0) }}
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="9" style="text-align: center; color: var(--text-secondary);">No open positions</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h2>📜 Closed Positions</h2>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">Showing last 50 closed positions</p>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Closed</th>
+                <th>Market</th>
+                <th>Side</th>
+                <th>Size</th>
+                <th>Cost Basis</th>
+                <th>Realized P&L</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for pos in closed_positions %}
+            <tr>
+                <td>#{{ pos.id }}</td>
+                <td>{{ (pos.closed_at or pos.opened_at)[:16] }}</td>
+                <td title="{{ pos.market_title or '-' }}">{{ (pos.market_title or '-')[:35] }}{{ '...' if (pos.market_title or '')|length > 35 else '' }}</td>
+                <td><span class="badge {{ 'badge-buy' if pos.side == 'YES' else 'badge-sell' }}">{{ pos.side }}</span></td>
+                <td>{{ "%.2f"|format(pos.size) }}</td>
+                <td>${{ "%.2f"|format(pos.cost_basis) }}</td>
+                <td class="{{ 'positive' if pos.realized_pnl >= 0 else 'negative' }}">
+                    {{ '+' if pos.realized_pnl >= 0 else '' }}${{ "%.2f"|format(pos.realized_pnl or 0) }}
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" style="text-align: center; color: var(--text-secondary);">No closed positions</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

@@ -1,0 +1,48 @@
+# Nixpacks configuration for Railway deployment (BACKUP - Dockerfile is primary)
+# Last modified: 2026-03-19T14:00:00Z - v31 - Repository cleanup
+#
+# NOTE: Railway is configured to use Dockerfile (builder: DOCKERFILE in railway.json).
+# This nixpacks.toml is kept as a backup in case Dockerfile build fails.
+#
+# The start command is now in railway.json:
+#   uvicorn polybot.main_fastapi:app --host 0.0.0.0 --port $PORT
+#
+# See .railway-rebuild for the full history.
+
+# Python provider
+providers = ["python"]
+
+[variables]
+# Force no caching
+PIP_NO_CACHE_DIR = "1"
+PIP_DISABLE_PIP_VERSION_CHECK = "1"
+# Ensure unbuffered output for logging
+PYTHONUNBUFFERED = "1"
+PYTHONDONTWRITEBYTECODE = "1"
+# Build version - increment to force cache invalidation
+BUILD_VERSION = "v31-2026-03-19T140000Z-repo-cleanup-professional-docs"
+
+[phases.setup]
+# System packages needed for compilation
+nixPkgs = ["python311", "gcc"]
+
+[phases.install]
+# Install requirements.txt dependencies globally (no venv)
+cmds = [
+    "pip install --no-cache-dir -r requirements.txt",
+    "pip install --no-cache-dir -e ."
+]
+
+[phases.build]
+# Ensure the static/ directory is present in the final image at /app/static/
+# Nixpacks builds from /app, so static/ is already here — this mkdir+cp makes
+# it explicit so the layer is committed and available at runtime.
+# Also create optuna_viz subdirectory for Optuna visualization persistence.
+cmds = [
+    "mkdir -p /app/static",
+    "cp -r static/. /app/static/",
+    "mkdir -p /app/static/optuna_viz && chmod 777 /app/static/optuna_viz"
+]
+
+# NOTE: [start] section removed - Railway ignores it.
+# Start command is defined in railway.json deploy.startCommand instead.

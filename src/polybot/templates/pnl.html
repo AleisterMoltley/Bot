@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block title %}PolyBot Dashboard - P&L{% endblock %}
+
+{% block content %}
+<div class="grid">
+    <div class="card">
+        <h2>💰 Total Performance</h2>
+        <div class="stat-grid">
+            <div class="stat">
+                <div class="stat-value {{ 'positive' if total_pnl.total_realized >= 0 else 'negative' }}">
+                    {{ '+' if total_pnl.total_realized >= 0 else '' }}${{ "%.2f"|format(total_pnl.total_realized or 0) }}
+                </div>
+                <div class="stat-label">Total Realized P&L</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value {{ 'positive' if total_pnl.total_unrealized >= 0 else 'negative' }}">
+                    {{ '+' if total_pnl.total_unrealized >= 0 else '' }}${{ "%.2f"|format(total_pnl.total_unrealized or 0) }}
+                </div>
+                <div class="stat-label">Total Unrealized</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{{ total_pnl.total_trades or 0 }}</div>
+                <div class="stat-label">Total Trades</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value {% if total_pnl.overall_winrate >= 50 %}positive{% elif total_pnl.overall_winrate < 40 %}negative{% endif %}">
+                    {{ "%.1f"|format(total_pnl.overall_winrate or 0) }}%
+                </div>
+                <div class="stat-label">Overall Win Rate</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>📅 Today's Summary</h2>
+        <div class="stat-grid">
+            <div class="stat">
+                <div class="stat-value {{ 'positive' if today_pnl.realized >= 0 else 'negative' }}">
+                    {{ '+' if today_pnl.realized >= 0 else '' }}${{ "%.2f"|format(today_pnl.realized or 0) }}
+                </div>
+                <div class="stat-label">Realized</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{{ today_pnl.total_trades or 0 }}</div>
+                <div class="stat-label">Trades</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value positive">{{ today_pnl.winning_trades or 0 }}</div>
+                <div class="stat-label">Winners</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value negative">{{ today_pnl.losing_trades or 0 }}</div>
+                <div class="stat-label">Losers</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>📊 Daily P&L History</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Realized</th>
+                <th>Unrealized</th>
+                <th>Total Trades</th>
+                <th>Winners</th>
+                <th>Losers</th>
+                <th>Win Rate</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for day in daily_pnl %}
+            <tr>
+                <td>{{ day.date }}</td>
+                <td class="{{ 'positive' if day.realized >= 0 else 'negative' }}">
+                    {{ '+' if day.realized >= 0 else '' }}${{ "%.2f"|format(day.realized or 0) }}
+                </td>
+                <td class="{{ 'positive' if day.unrealized >= 0 else 'negative' }}">
+                    {{ '+' if day.unrealized >= 0 else '' }}${{ "%.2f"|format(day.unrealized or 0) }}
+                </td>
+                <td>{{ day.total_trades }}</td>
+                <td class="positive">{{ day.winning_trades }}</td>
+                <td class="negative">{{ day.losing_trades }}</td>
+                <td class="{{ 'positive' if day.winrate >= 50 else 'negative' if day.winrate < 40 else '' }}">
+                    {{ "%.1f"|format(day.winrate or 0) }}%
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" style="text-align: center; color: var(--text-secondary);">No P&L history yet</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

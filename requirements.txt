@@ -1,0 +1,50 @@
+# PolyBot Dependencies
+# Last updated: 2026-03-17T22:58:00Z (v6 - force cache bust)
+# NOTE: This file installs dependencies. The 'polybot' CLI is created
+# by 'pip install .' which reads pyproject.toml [project.scripts]
+# BUILD_VERSION=v6-no-cache
+#
+# Core HTTP/Network
+aiohttp>=3.9
+aiohttp-socks>=0.8.4
+httpx[http2,socks]>=0.27
+websockets>=12.0
+requests>=2.28
+PySocks>=1.7.1
+# CEX Exchange Data
+ccxt>=4.5
+# Blockchain (Polygon/Polymarket)
+web3>=7.0.0
+eth-account>=0.8
+eth-abi>=5.0
+eth-utils>=4.0
+py-clob-client==0.34.6
+# Blockchain (Solana)
+solana>=0.34
+solders
+base58
+# Data
+pycoingecko>=3.1
+numpy>=1.24
+aiosqlite>=0.19
+# Configuration
+pydantic>=2.6
+pydantic-settings>=2.1
+python-dotenv>=1.0
+pyyaml>=6.0
+# Logging & CLI
+structlog>=24.1
+rich>=13.7
+click>=8.1
+# Web Dashboard
+fastapi>=0.109
+uvicorn>=0.27
+jinja2>=3.1
+# Charting
+matplotlib>=3.8
+# Time zones
+pytz>=2024.1
+# Hyperparameter Optimization
+optuna>=3.6.0
+plotly>=5.24.0
+kaleido>=0.2.1          # für PNG-Export der Plots

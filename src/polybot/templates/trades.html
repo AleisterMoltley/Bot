@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}PolyBot Dashboard - Trades{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>📊 All Trades</h2>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">Showing last 100 trades</p>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Time</th>
+                <th>Mode</th>
+                <th>Side</th>
+                <th>Price</th>
+                <th>Size</th>
+                <th>Cost</th>
+                <th>P&L</th>
+                <th>Market</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for trade in trades %}
+            <tr>
+                <td>#{{ trade.id }}</td>
+                <td>{{ trade.timestamp[:19] }}</td>
+                <td>{{ trade.mode }}</td>
+                <td><span class="badge {{ 'badge-buy' if trade.side == 'BUY' else 'badge-sell' }}">{{ trade.side }}</span></td>
+                <td>${{ "%.4f"|format(trade.price) }}</td>
+                <td>{{ "%.2f"|format(trade.size) }}</td>
+                <td>${{ "%.2f"|format(trade.cost) }}</td>
+                <td class="{{ 'positive' if trade.profit >= 0 else 'negative' }}">
+                    {{ '+' if trade.profit >= 0 else '' }}${{ "%.2f"|format(trade.profit or 0) }}
+                </td>
+                <td title="{{ trade.market_title or '-' }}">{{ (trade.market_title or '-')[:40] }}{{ '...' if (trade.market_title or '')|length > 40 else '' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="9" style="text-align: center; color: var(--text-secondary);">No trades yet</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

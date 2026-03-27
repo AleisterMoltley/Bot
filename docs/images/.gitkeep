@@ -1,0 +1,39 @@
+# 📸 Image Placeholder Directory
+
+This here folder is fer storin' screenshots and graphics fer the README!
+
+Since we're usin' ASCII art diagrams instead of real screenshots (they work everywhere, y'all!),
+this folder might stay empty. But if ya wanna add real screenshots later, here's what ya need:
+
+## If Ya Wanna Add Real Screenshots Later:
+
+1. **Telegram Bot Screenshots:**
+   - `botfather_search.png` - Searchin' fer @BotFather
+   - `botfather_newbot.png` - Creatin' a new bot
+   - `bot_token.png` - The token ya git (CENSOR IT!)
+   - `chat_id.png` - Gittin' yer Chat ID from @userinfobot
+   - `bot_menu.png` - The bot's menu when ya send /start
+
+2. **Railway Screenshots:**
+   - `railway_login.png` - The login page
+   - `railway_new_project.png` - Startin' a new project
+   - `railway_select_repo.png` - Pickin' yer repository
+   - `railway_variables.png` - Where ya put them variables
+   - `railway_deploy_success.png` - Green deploy = happy times!
+
+## Tips fer Screenshots:
+
+- 🔴 ALWAYS censor sensitive info (tokens, IDs, keys)!
+- 📏 Keep images around 800px wide fer best display
+- 🖼️ Use PNG format fer better quality
+- ✏️ Add arrows/circles to highlight important areas
+- 🌙 Light theme screenshots work best fer readability
+
+## Why We Use ASCII Art Instead:
+
+1. ✅ Works in EVERY markdown viewer
+2. ✅ No broken image links
+3. ✅ Always up-to-date (no outdated screenshots)
+4. ✅ Loads instantly - no waitin'!
+5. ✅ Easy to edit directly in the README
+6. ✅ Fun hillbilly vibe!

@@ -1,0 +1,6 @@
+[build]
+builder = "DOCKERFILE"
+dockerfile = "Dockerfile"
+
+[build.environment]
+RAILWAY_BUILD = "true"        # signalisiert dem Code, dass Tests übersprungen werden sollen

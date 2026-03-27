@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PolyBot — PnL Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            surface: '#0f1117',
+            card:    '#1a1d27',
+            border:  '#2a2d3a',
+          },
+          fontFamily: {
+            mono: ['"JetBrains Mono"', '"Fira Code"', 'ui-monospace', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    body { background-color: #0f1117; font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace; }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+    .pulse { animation: pulse-dot 2s ease-in-out infinite; }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .spinner {
+      width: 1.25rem; height: 1.25rem;
+      border: 2px solid #2a2d3a;
+      border-top-color: #22c55e;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      display: inline-block;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #1a1d27; }
+    ::-webkit-scrollbar-thumb { background: #2a2d3a; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3a3d4a; }
+
+    /* Table row hover */
+    tbody tr:hover { background-color: rgba(255,255,255,0.03); }
+  </style>
+</head>
+<body class="min-h-screen text-gray-200">
+
+  <!-- ── Header ─────────────────────────────────────────────────────────── -->
+  <header class="border-b border-border px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <span class="text-2xl">🤖</span>
+      <h1 class="text-xl font-bold text-green-400 tracking-tight">PolyBot Dashboard</h1>
+    </div>
+    <div class="flex items-center gap-4 text-sm text-gray-500">
+      <div id="status-indicator" class="flex items-center gap-2">
+        <span id="status-dot" class="inline-block w-2 h-2 rounded-full bg-gray-600"></span>
+        <span id="status-text">Connecting…</span>
+      </div>
+      <div id="refresh-timer" class="tabular-nums">—</div>
+    </div>
+  </header>
+
+  <!-- ── Main ───────────────────────────────────────────────────────────── -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-6">
+
+    <!-- Error banner -->
+    <div id="error-banner" class="hidden rounded-lg border border-red-800 bg-red-950/40 px-4 py-3 text-red-400 text-sm flex items-start gap-3">
+      <span class="text-lg leading-none mt-0.5">⚠</span>
+      <div>
+        <p class="font-semibold">Failed to load data</p>
+        <p id="error-message" class="text-red-500 mt-0.5"></p>
+      </div>
+    </div>
+
+    <!-- ── PnL Summary Cards ─────────────────────────────────────────────── -->
+    <section>
+      <h2 class="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-3">PnL Summary</h2>
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+
+        <div class="bg-card border border-border rounded-xl p-4 flex flex-col gap-1">
+          <span class="text-xs text-gray-500 uppercase tracking-wider">Realized</span>
+          <span id="stat-realized" class="text-xl font-bold tabular-nums text-gray-400">—</span>
+        </div>
+
+        <div class="bg-card border border-border rounded-xl p-4 flex flex-col gap-1">
+          <span class="text-xs text-gray-500 uppercase tracking-wider">Unrealized</span>
+          <span id="stat-unrealized" class="text-xl font-bold tabular-nums text-gray-400">—</span>
+        </div>
+
+        <div class="bg-card border border-border rounded-xl p-4 flex flex-col gap-1">
+          <span class="text-xs text-gray-500 uppercase tracking-wider">Net PnL</span>
+          <span id="stat-net" class="text-xl font-bold tabular-nums text-gray-400">—</span>
+        </div>
+
+        <div class="bg-card border border-border rounded-xl p-4 flex flex-col gap-1">
+          <span class="text-xs text-gray-500 uppercase tracking-wider">Total Fees</span>
+          <span id="stat-fees" class="text-xl font-bold tabular-nums text-gray-400">—</span>
+        </div>
+
+        <div class="bg-card border border-border rounded-xl p-4 flex flex-col gap-1">
+          <span class="text-xs text-gray-500 uppercase tracking-wider">Funding</span>
+          <span id="stat-funding" class="text-xl font-bold tabular-nums text-gray-400">—</span>
+        </div>
+
+        <div class="bg-card border border-border rounded-xl p-4 flex flex-col gap-1">
+          <span class="text-xs text-gray-500 uppercase tracking-wider">Open Positions</span>
+          <span id="stat-open-count" class="text-xl font-bold tabular-nums text-gray-400">—</span>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ── System Status ─────────────────────────────────────────────────── -->
+    <section>
+      <h2 class="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-3">System Status</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+
+        <div id="alchemy-status-card" class="bg-card border border-border rounded-xl p-4 flex flex-col gap-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-gray-500 uppercase tracking-wider">Alchemy RPC</span>
+            <span id="alchemy-status-dot" class="w-2 h-2 rounded-full bg-gray-600"></span>
+          </div>
+          <span id="alchemy-status-text" class="text-sm font-medium text-gray-400">Prüfe...</span>
+          <span id="alchemy-block" class="text-xs text-gray-500 tabular-nums"></span>
+          <a id="alchemy-help-link" href="https://dashboard.alchemy.com/signup?chain=polygon" target="_blank" class="hidden text-xs text-blue-400 hover:underline">
+            🔑 Alchemy Key hier holen →
+          </a>
+        </div>
+
+        <div id="allowance-status-card" class="bg-card border border-border rounded-xl p-4 flex flex-col gap-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-gray-500 uppercase tracking-wider">USDC Allowance</span>
+            <span id="allowance-status-dot" class="w-2 h-2 rounded-full bg-gray-600"></span>
+          </div>
+          <span id="allowance-status-text" class="text-sm font-medium text-gray-400">Prüfe...</span>
+          <span id="allowance-amount" class="text-xs text-gray-500 tabular-nums"></span>
+        </div>
+
+        <!-- USDC Balance (bridged USDC.e auf Polygon) – neu seit 21.03.2026 -->
+        <div id="usdc-balance-card" class="bg-card border border-border rounded-xl p-4 flex flex-col gap-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-gray-500 uppercase tracking-wider">USDC Balance</span>
+            <span id="usdc-balance-dot" class="w-2 h-2 rounded-full bg-gray-600"></span>
+          </div>
+          <span id="usdc-balance-text" class="text-sm font-medium text-gray-400">Prüfe...</span>
+          <span id="usdc-balance-amount" class="text-xs text-gray-500 tabular-nums"></span>
+          <!-- Trading Filter Info (Railway ENV) -->
+          <div id="trading-filters-info" class="mt-2 pt-2 border-t border-border text-xs text-gray-500 space-y-1">
+            <div class="flex justify-between"><span>Min Balance:</span><span id="filter-min-balance">—</span></div>
+            <div class="flex justify-between"><span>Min Trade:</span><span id="filter-min-trade">—</span></div>
+            <div class="flex justify-between"><span>Min Edge:</span><span id="filter-min-edge">—</span></div>
+            <div class="flex justify-between"><span>Max Risk/Trade:</span><span id="filter-max-risk">—</span></div>
+            <div class="flex justify-between"><span>Min Confidence:</span><span id="filter-min-conf">—</span></div>
+          </div>
+        </div>
+
+        <div class="bg-card border border-border rounded-xl p-4 flex flex-col gap-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-gray-500 uppercase tracking-wider">Nächster Scan</span>
+            <span class="w-2 h-2 rounded-full bg-blue-400 pulse"></span>
+          </div>
+          <span id="next-scan-countdown" class="text-sm font-medium text-blue-400 tabular-nums">—</span>
+          <div class="flex justify-between text-xs text-gray-500">
+            <span>Scan-Intervall:</span>
+            <span id="scan-interval" class="font-medium">—</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ── Production Safety Status ─────────────────────────────────────────── -->
+    <section>
+      <h2 class="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-3">Production Safety</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+
+        <div id="safety-score-card" class="bg-card border border-border rounded-xl p-4 flex flex-col gap-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-gray-500 uppercase tracking-wider">Safety Score</span>
+            <span id="safety-score-dot" class="w-2 h-2 rounded-full bg-gray-600"></span>
+          </div>
+          <span id="safety-score-text" class="text-xl font-bold text-green-400 tabular-nums">—</span>
+        </div>
+
+        <div class="bg-card border border-border rounded-xl p-4 flex flex-col gap-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-gray-500 uppercase tracking-wider">Graceful Shutdown</span>
+            <span class="w-2 h-2 rounded-full bg-green-400"></span>
+          </div>
+          <span id="graceful-shutdown-text" class="text-sm font-medium text-green-400">✅ active</span>
+        </div>
+
+        <div class="bg-card border border-border rounded-xl p-4 flex flex-col gap-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-gray-500 uppercase tracking-wider">Auto-Backup</span>
+            <span id="backup-status-dot" class="w-2 h-2 rounded-full bg-gray-600"></span>
+          </div>
+          <span id="backup-status-text" class="text-sm font-medium text-gray-400">—</span>
+          <span id="last-backup-time" class="text-xs text-gray-500"></span>
+        </div>
+
+        <div class="bg-card border border-border rounded-xl p-4 flex flex-col gap-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-gray-500 uppercase tracking-wider">Error Logs</span>
+            <span id="error-count-badge" class="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded-full tabular-nums">0</span>
+          </div>
+          <a href="/logs" target="_blank" class="text-sm font-medium text-blue-400 hover:underline">📋 View Logs →</a>
+          <span id="error-count-text" class="text-xs text-gray-500">No critical errors</span>
+        </div>
+
+      </div>
+    </section>
+    <section>
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-xs font-semibold uppercase tracking-widest text-gray-500">Open Positions</h2>
+        <div id="positions-loading" class="hidden">
+          <span class="spinner"></span>
+        </div>
+      </div>
+
+      <div class="bg-card border border-border rounded-xl overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-border text-xs text-gray-500 uppercase tracking-wider">
+                <th class="px-4 py-3 text-left font-medium">Market</th>
+                <th class="px-4 py-3 text-left font-medium">Outcome</th>
+                <th class="px-4 py-3 text-right font-medium">Size</th>
+                <th class="px-4 py-3 text-right font-medium">Entry Price</th>
+                <th class="px-4 py-3 text-right font-medium">Current Price</th>
+                <th class="px-4 py-3 text-right font-medium">Unrealized PnL</th>
+                <th class="px-4 py-3 text-center font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody id="positions-tbody">
+              <tr>
+                <td colspan="7" class="px-4 py-10 text-center text-gray-600">
+                  <div class="flex flex-col items-center gap-2">
+                    <span class="spinner"></span>
+                    <span class="text-xs">Loading positions…</span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Footer ───────────────────────────────────────────────────────── -->
+    <footer class="text-center text-xs text-gray-600 pt-2 pb-6">
+      Last updated: <span id="last-updated">—</span> &nbsp;·&nbsp; Auto-refreshes every 5 s
+    </footer>
+
+  </main>
+
+  <!-- ── JavaScript ─────────────────────────────────────────────────────── -->
+  <script>
+    // ── Helpers ────────────────────────────────────────────────────────────
+
+    /** Format a numeric dollar value with sign and colour class. */
+    function fmtPnl(value) {
+      if (value === null || value === undefined || isNaN(value)) return { text: '—', cls: 'text-gray-400' };
+      const n = parseFloat(value);
+      const sign = n >= 0 ? '+' : '';
+      return {
+        text: `${sign}$${Math.abs(n).toFixed(2)}`,
+        cls: n > 0 ? 'text-green-400' : n < 0 ? 'text-red-400' : 'text-gray-400',
+      };
+    }
+
+    /** Format a plain dollar value (no sign). */
+    function fmtUsd(value, decimals = 2) {
+      if (value === null || value === undefined || isNaN(value)) return '—';
+      return `$${parseFloat(value).toFixed(decimals)}`;
+    }
+
+    /** Apply text + colour class to an element. */
+    function applyPnl(id, value) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const { text, cls } = fmtPnl(value);
+      el.textContent = text;
+      el.className = `text-xl font-bold tabular-nums ${cls}`;
+    }
+
+    /** Set a plain stat value. */
+    function setStat(id, text, extraCls = 'text-gray-200') {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = text;
+      el.className = `text-xl font-bold tabular-nums ${extraCls}`;
+    }
+
+    // ── Status indicator ───────────────────────────────────────────────────
+
+    function setStatus(state) {
+      const dot  = document.getElementById('status-dot');
+      const text = document.getElementById('status-text');
+      if (state === 'ok') {
+        dot.className  = 'inline-block w-2 h-2 rounded-full bg-green-400 pulse';
+        text.textContent = 'Live';
+        text.className = 'text-green-400';
+      } else if (state === 'error') {
+        dot.className  = 'inline-block w-2 h-2 rounded-full bg-red-500';
+        text.textContent = 'Error';
+        text.className = 'text-red-400';
+      } else {
+        dot.className  = 'inline-block w-2 h-2 rounded-full bg-yellow-400 pulse';
+        text.textContent = 'Fetching…';
+        text.className = 'text-yellow-400';
+      }
+    }
+
+    function showError(msg) {
+      document.getElementById('error-banner').classList.remove('hidden');
+      document.getElementById('error-message').textContent = msg;
+    }
+
+    function hideError() {
+      document.getElementById('error-banner').classList.add('hidden');
+    }
+
+    // ── PnL normalisation ──────────────────────────────────────────────────
+    // The dashboard.py /api/pnl returns { today: {...}, total: {...} }.
+    // The instructions describe a flat shape. We handle both.
+
+    function normalisePnl(data) {
+      // Flat shape (as described in the spec)
+      if ('net_pnl' in data || 'realized_pnl' in data) {
+        return {
+          realized_pnl:        data.realized_pnl        ?? data.realized ?? 0,
+          unrealized_pnl:      data.unrealized_pnl      ?? data.unrealized ?? 0,
+          total_fees:          data.total_fees           ?? 0,
+          accrued_funding:     data.accrued_funding      ?? 0,
+          net_pnl:             data.net_pnl              ?? 0,
+          open_positions_count: data.open_positions_count ?? null,
+        };
+      }
+      // Nested shape from dashboard.py: { today: {...}, total: {...} }
+      const total = data.total || {};
+      const today = data.today || {};
+      return {
+        realized_pnl:        total.total_realized   ?? today.realized   ?? 0,
+        unrealized_pnl:      total.total_unrealized ?? today.unrealized  ?? 0,
+        total_fees:          total.total_fees       ?? 0,
+        accrued_funding:     total.accrued_funding  ?? 0,
+        net_pnl:             total.net_pnl          ?? (
+                               (total.total_realized ?? 0) + (total.total_unrealized ?? 0)
+                             ),
+        open_positions_count: null,
+      };
+    }
+
+    // ── Positions normalisation ────────────────────────────────────────────
+    // dashboard.py returns full DB rows; spec describes a simpler shape.
+
+    function normalisePosition(p) {
+      return {
+        market_title:    p.market_title  || p.market || '—',
+        outcome:         p.outcome       || p.side   || '—',
+        size:            p.size          ?? 0,
+        avg_entry_price: p.avg_entry_price ?? p.avg_price ?? 0,
+        current_price:   p.current_price ?? 0,
+        unrealized_pnl:  p.unrealized_pnl ?? 0,
+        status:          p.status        || 'OPEN',
+      };
+    }
+
+    // ── Render PnL summary ─────────────────────────────────────────────────
+
+    function renderPnl(raw) {
+      const d = normalisePnl(raw);
+      applyPnl('stat-realized',   d.realized_pnl);
+      applyPnl('stat-unrealized', d.unrealized_pnl);
+      applyPnl('stat-net',        d.net_pnl);
+
+      // Fees — always a cost, shown in amber
+      const fees = parseFloat(d.total_fees);
+      const feesEl = document.getElementById('stat-fees');
+      feesEl.textContent = isNaN(fees) ? '—' : `$${fees.toFixed(4)}`;
+      feesEl.className = 'text-xl font-bold tabular-nums ' + (fees > 0 ? 'text-amber-400' : 'text-gray-400');
+
+      // Funding — same treatment
+      const fund = parseFloat(d.accrued_funding);
+      const fundEl = document.getElementById('stat-funding');
+      fundEl.textContent = isNaN(fund) ? '—' : `$${fund.toFixed(4)}`;
+      fundEl.className = 'text-xl font-bold tabular-nums ' + (fund > 0 ? 'text-amber-400' : 'text-gray-400');
+
+      // Open positions count (may come from PnL endpoint or be set later)
+      if (d.open_positions_count !== null) {
+        setStat('stat-open-count', String(d.open_positions_count), 'text-blue-400');
+      }
+    }
+
+    // ── Render positions table ─────────────────────────────────────────────
+
+    function renderPositions(rows) {
+      const tbody = document.getElementById('positions-tbody');
+
+      // Update open-positions count from the actual data
+      const openRows = rows.filter(r => (r.status || '').toUpperCase() !== 'CLOSED');
+      setStat('stat-open-count', String(openRows.length), 'text-blue-400');
+
+      if (rows.length === 0) {
+        // Empty state - no duplicate Alchemy warnings (status shown in System Status cards)
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="7" class="px-4 py-10 text-center text-gray-500 text-sm">
+              <div class="flex flex-col items-center gap-3">
+                <span class="text-2xl">🔍</span>
+                <span class="text-gray-300 font-medium">Bot scannt aktiv Polymarket</span>
+                <div class="flex items-center gap-2 text-xs">
+                  <span class="text-gray-500">Nächster Scan in:</span>
+                  <span class="text-blue-400 font-mono font-bold">${nextCycleIn}</span>
+                </div>
+                <span class="text-gray-600 text-xs">(Scannt alle ${cycleIntervalSeconds}s nach profitablen Gelegenheiten)</span>
+              </div>
+            </td>
+          </tr>`;
+        return;
+      }
+
+      tbody.innerHTML = rows.map(raw => {
+        const p = normalisePosition(raw);
+
+        const { text: upnlText, cls: upnlCls } = fmtPnl(p.unrealized_pnl);
+
+        const outcomeColour = p.outcome === 'YES'
+          ? 'bg-green-900/40 text-green-400 border border-green-800'
+          : p.outcome === 'NO'
+            ? 'bg-red-900/40 text-red-400 border border-red-800'
+            : 'bg-gray-800 text-gray-400 border border-gray-700';
+
+        const statusColour = (p.status || '').toUpperCase() === 'OPEN'
+          ? 'bg-blue-900/40 text-blue-400 border border-blue-800'
+          : 'bg-gray-800 text-gray-500 border border-gray-700';
+
+        // Truncate long market titles
+        const title = p.market_title.length > 55
+          ? p.market_title.slice(0, 52) + '…'
+          : p.market_title;
+
+        return `
+          <tr class="border-b border-border/50 transition-colors">
+            <td class="px-4 py-3 max-w-xs">
+              <span title="${escHtml(p.market_title)}" class="block truncate text-gray-200">${escHtml(title)}</span>
+            </td>
+            <td class="px-4 py-3">
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${outcomeColour}">
+                ${escHtml(p.outcome)}
+              </span>
+            </td>
+            <td class="px-4 py-3 text-right tabular-nums text-gray-300">${parseFloat(p.size).toFixed(2)}</td>
+            <td class="px-4 py-3 text-right tabular-nums text-gray-300">${fmtUsd(p.avg_entry_price, 4)}</td>
+            <td class="px-4 py-3 text-right tabular-nums text-gray-300">${fmtUsd(p.current_price, 4)}</td>
+            <td class="px-4 py-3 text-right tabular-nums font-semibold ${upnlCls}">${upnlText}</td>
+            <td class="px-4 py-3 text-center">
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${statusColour}">
+                ${escHtml((p.status || 'OPEN').toUpperCase())}
+              </span>
+            </td>
+          </tr>`;
+      }).join('');
+    }
+
+    function escHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    // ── Status card update functions ───────────────────────────────────────
+
+    function updateAlchemyStatus(data) {
+      const dot = document.getElementById('alchemy-status-dot');
+      const text = document.getElementById('alchemy-status-text');
+      const block = document.getElementById('alchemy-block');
+      const helpLink = document.getElementById('alchemy-help-link');
+      const card = document.getElementById('alchemy-status-card');
+
+      const rpc = data.rpc || {};
+      const isConnected = data.alchemy_connected;
+      const isConfigured = rpc.alchemy_configured;
+      const isMissingError = rpc.alchemy_missing_error;
+      const blockNumber = data.alchemy_block_number || rpc.block_number;
+      const helpUrl = rpc.help_url;
+
+      if (isConnected) {
+        // ✅ GREEN: Alchemy connected and working
+        dot.className = 'w-2 h-2 rounded-full bg-green-400 pulse';
+        text.textContent = '✅ Verbunden';
+        text.className = 'text-sm font-medium text-green-400';
+        card.className = 'bg-card border border-green-800/50 rounded-xl p-4 flex flex-col gap-2';
+        if (blockNumber) {
+          block.textContent = `Block #${blockNumber.toLocaleString()}`;
+          block.className = 'text-xs text-green-500 tabular-nums';
+        } else {
+          block.textContent = '';
+        }
+        helpLink.classList.add('hidden');
+      } else if (isMissingError) {
+        // ❌ RED: FORCE_ALCHEMY=true but no key - hard error
+        dot.className = 'w-2 h-2 rounded-full bg-red-500';
+        text.textContent = '❌ ALCHEMY_API_KEY in Railway setzen!';
+        text.className = 'text-sm font-medium text-red-400';
+        card.className = 'bg-card border border-red-800/50 rounded-xl p-4 flex flex-col gap-2';
+        block.textContent = 'Fallback RPC aktiv';
+        block.className = 'text-xs text-red-500';
+        if (helpUrl) {
+          helpLink.href = helpUrl;
+          helpLink.classList.remove('hidden');
+        }
+      } else if (isConfigured) {
+        // ⚠️ YELLOW: Configured but not connected
+        dot.className = 'w-2 h-2 rounded-full bg-yellow-400';
+        text.textContent = '⚠️ Nicht verbunden';
+        text.className = 'text-sm font-medium text-yellow-400';
+        card.className = 'bg-card border border-yellow-800/50 rounded-xl p-4 flex flex-col gap-2';
+        block.textContent = 'Fallback RPC aktiv';
+        block.className = 'text-xs text-yellow-500';
+        helpLink.classList.add('hidden');
+      } else {
+        // ⚪ GRAY: Not configured (FORCE_ALCHEMY=false)
+        dot.className = 'w-2 h-2 rounded-full bg-gray-500';
+        text.textContent = 'Nicht konfiguriert';
+        text.className = 'text-sm font-medium text-gray-400';
+        card.className = 'bg-card border border-border rounded-xl p-4 flex flex-col gap-2';
+        block.textContent = 'Public RPC aktiv';
+        block.className = 'text-xs text-gray-500';
+        if (helpUrl) {
+          helpLink.href = helpUrl;
+          helpLink.classList.remove('hidden');
+        } else {
+          helpLink.classList.add('hidden');
+        }
+      }
+    }
+
+    function updateAllowanceStatus(data) {
+      const dot = document.getElementById('allowance-status-dot');
+      const text = document.getElementById('allowance-status-text');
+      const amount = document.getElementById('allowance-amount');
+      const card = document.getElementById('allowance-status-card');
+
+      const allowanceOk = data.allowance_ok;
+      const allowanceUsdc = data.allowance_usdc || 0;
+      const statusMessage = data.allowance_status || '';
+
+      // Check if status message indicates success (Auto-Approve or sufficient allowance)
+      const isSuccess = allowanceOk || statusMessage.includes('✅');
+
+      if (isSuccess) {
+        // ✅ GREEN: Allowance OK or Auto-Approve successful
+        dot.className = 'w-2 h-2 rounded-full bg-green-400 pulse';
+        text.textContent = statusMessage || '✅ Freigegeben';
+        text.className = 'text-sm font-medium text-green-400';
+        card.className = 'bg-card border border-green-800/50 rounded-xl p-4 flex flex-col gap-2';
+        amount.textContent = allowanceUsdc > 0 ? `$${allowanceUsdc.toLocaleString()} USDC` : 'Unbegrenzt';
+        amount.className = 'text-xs text-green-500 tabular-nums';
+      } else if (allowanceUsdc > 0) {
+        // ⚠️ YELLOW: Low allowance
+        dot.className = 'w-2 h-2 rounded-full bg-yellow-400';
+        text.textContent = '⚠️ Niedrig';
+        text.className = 'text-sm font-medium text-yellow-400';
+        card.className = 'bg-card border border-yellow-800/50 rounded-xl p-4 flex flex-col gap-2';
+        amount.textContent = `$${allowanceUsdc.toLocaleString()} USDC`;
+        amount.className = 'text-xs text-yellow-500 tabular-nums';
+      } else {
+        // ❌ RED: No allowance
+        dot.className = 'w-2 h-2 rounded-full bg-red-500';
+        text.textContent = statusMessage || '❌ Nicht freigegeben';
+        text.className = 'text-sm font-medium text-red-400';
+        card.className = 'bg-card border border-red-800/50 rounded-xl p-4 flex flex-col gap-2';
+        amount.textContent = 'Auto-Approve prüfen';
+        amount.className = 'text-xs text-red-500';
+      }
+    }
+
+    // USDC Balance (bridged USDC.e auf Polygon) – neu seit 21.03.2026
+    function updateUsdcBalance(data) {
+      const dot = document.getElementById('usdc-balance-dot');
+      const text = document.getElementById('usdc-balance-text');
+      const amount = document.getElementById('usdc-balance-amount');
+      const card = document.getElementById('usdc-balance-card');
+
+      // Get USDC balance from wallet_usdc or wallet.usdc_balance
+      const usdcBalance = parseFloat(data.wallet_usdc || data.wallet?.usdc_balance || 0);
+
+      if (usdcBalance >= 10) {
+        // ✅ GREEN: Healthy balance
+        dot.className = 'w-2 h-2 rounded-full bg-green-400 pulse';
+        text.textContent = `$${usdcBalance.toFixed(2)}`;
+        text.className = 'text-sm font-medium text-green-400';
+        card.className = 'bg-card border border-green-800/50 rounded-xl p-4 flex flex-col gap-2';
+        amount.textContent = 'USDC verfügbar';
+        amount.className = 'text-xs text-green-500 tabular-nums';
+      } else if (usdcBalance > 0) {
+        // ⚠️ YELLOW: Low balance (< 10 USDC)
+        dot.className = 'w-2 h-2 rounded-full bg-yellow-400';
+        text.textContent = `⚠️ $${usdcBalance.toFixed(2)}`;
+        text.className = 'text-sm font-medium text-yellow-400';
+        card.className = 'bg-card border border-yellow-800/50 rounded-xl p-4 flex flex-col gap-2';
+        amount.textContent = 'Niedriger USDC-Stand';
+        amount.className = 'text-xs text-yellow-500 tabular-nums';
+      } else {
+        // ❌ RED: No balance
+        dot.className = 'w-2 h-2 rounded-full bg-red-500';
+        text.textContent = '❌ $0.00';
+        text.className = 'text-sm font-medium text-red-400';
+        card.className = 'bg-card border border-red-800/50 rounded-xl p-4 flex flex-col gap-2';
+        amount.textContent = 'Kein USDC vorhanden';
+        amount.className = 'text-xs text-red-500';
+      }
+
+      // Update trading filters display
+      updateTradingFilters(data);
+    }
+
+    function updateTradingFilters(data) {
+      const filters = data.trading_filters || {};
+      document.getElementById('filter-min-balance').textContent = 
+        filters.min_balance_usd !== undefined ? `$${filters.min_balance_usd.toFixed(2)}` : '—';
+      document.getElementById('filter-min-trade').textContent = 
+        filters.min_trade_size_usd !== undefined ? `$${filters.min_trade_size_usd.toFixed(2)}` : '—';
+      document.getElementById('filter-min-edge').textContent = 
+        filters.min_edge_percent !== undefined ? `${filters.min_edge_percent.toFixed(1)}%` : '—';
+      document.getElementById('filter-max-risk').textContent = 
+        filters.max_risk_per_trade !== undefined ? `${filters.max_risk_per_trade.toFixed(1)}%` : '—';
+      document.getElementById('filter-min-conf').textContent = 
+        filters.min_confidence_filter !== undefined ? `${(filters.min_confidence_filter * 100).toFixed(1)}%` : '—';
+    }
+
+    function updateNextScan(data) {
+      const countdown = document.getElementById('next-scan-countdown');
+      const scanIntervalEl = document.getElementById('scan-interval');
+
+      if (data.next_cycle_in) {
+        countdown.textContent = data.next_cycle_in;
+      }
+
+      // Use scan_interval_seconds (new) with fallback to cycle_interval_seconds (backwards compat)
+      const interval = data.scan_interval_seconds || data.config?.scan_interval_seconds || data.config?.cycle_interval_seconds || 30;
+      
+      // Update the scan interval display with red color warning for ≤5s
+      scanIntervalEl.textContent = interval + 's';
+      if (interval <= 5) {
+        scanIntervalEl.style.color = '#ff0000';
+      } else {
+        scanIntervalEl.style.color = '';
+      }
+    }
+
+    // ── Production Safety Status ────────────────────────────────────────────
+    async function fetchProductionSafety() {
+      try {
+        const res = await fetch('/api/production-safety');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Update Safety Score
+        const scoreText = document.getElementById('safety-score-text');
+        const scoreDot = document.getElementById('safety-score-dot');
+        if (scoreText) {
+          scoreText.textContent = data.safety_score || '—';
+          // Color based on score
+          const score = parseInt(data.safety_score) || 0;
+          if (score >= 90) {
+            scoreText.className = 'text-xl font-bold text-green-400 tabular-nums';
+            scoreDot.className = 'w-2 h-2 rounded-full bg-green-400';
+          } else if (score >= 50) {
+            scoreText.className = 'text-xl font-bold text-yellow-400 tabular-nums';
+            scoreDot.className = 'w-2 h-2 rounded-full bg-yellow-400';
+          } else {
+            scoreText.className = 'text-xl font-bold text-red-400 tabular-nums';
+            scoreDot.className = 'w-2 h-2 rounded-full bg-red-400';
+          }
+        }
+
+        // Update Graceful Shutdown
+        const shutdownText = document.getElementById('graceful-shutdown-text');
+        if (shutdownText) shutdownText.textContent = data.graceful_shutdown || '—';
+
+        // Update Auto-Backup
+        const backupText = document.getElementById('backup-status-text');
+        const backupDot = document.getElementById('backup-status-dot');
+        const lastBackup = document.getElementById('last-backup-time');
+        if (backupText) {
+          backupText.textContent = data.auto_backup || '—';
+          const isActive = data.auto_backup && data.auto_backup.includes('✅');
+          backupDot.className = isActive
+            ? 'w-2 h-2 rounded-full bg-green-400'
+            : 'w-2 h-2 rounded-full bg-gray-600';
+        }
+        if (lastBackup) lastBackup.textContent = data.last_backup ? `Last: ${data.last_backup}` : '';
+
+        // Update Error Count
+        const errorBadge = document.getElementById('error-count-badge');
+        const errorCountText = document.getElementById('error-count-text');
+        if (errorBadge) {
+          const count = data.error_count || 0;
+          errorBadge.textContent = count;
+          errorBadge.className = count > 0
+            ? 'text-xs bg-red-700 text-white px-2 py-0.5 rounded-full tabular-nums'
+            : 'text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded-full tabular-nums';
+        }
+        if (errorCountText) {
+          const count = data.error_count || 0;
+          errorCountText.textContent = count === 0
+            ? 'No critical errors'
+            : `${count} error${count > 1 ? 's' : ''} logged`;
+        }
+      } catch (err) {
+        // Ignore errors, keep default values
+      }
+    }
+
+    // ── Fetch & refresh loop ───────────────────────────────────────────────
+
+    const REFRESH_INTERVAL = 5000; // ms
+    let countdown = REFRESH_INTERVAL / 1000;
+    let timerHandle = null;
+    let cycleIntervalSeconds = 120; // default, will be updated from /api/status
+    let nextCycleIn = '—';         // live countdown from API
+    let alchemyConnected = false;  // alchemy connection status
+
+    function startCountdown() {
+      clearInterval(timerHandle);
+      countdown = REFRESH_INTERVAL / 1000;
+      updateTimer();
+      timerHandle = setInterval(() => {
+        countdown -= 1;
+        updateTimer();
+        if (countdown <= 0) {
+          clearInterval(timerHandle);
+          fetchAll();
+        }
+      }, 1000);
+    }
+
+    function updateTimer() {
+      const el = document.getElementById('refresh-timer');
+      if (el) el.textContent = `Refresh in ${countdown}s`;
+    }
+
+    async function fetchAll() {
+      setStatus('fetching');
+
+      let pnlOk = false;
+      let posOk = false;
+      const errors = [];
+
+      // ── /api/status (fetch scan interval + live countdown + alchemy/allowance) ─────────────
+      try {
+        const res = await fetch('/api/status');
+        if (res.ok) {
+          const data = await res.json();
+          // Use scan_interval_seconds (new) with fallback to cycle_interval_seconds
+          if (data.scan_interval_seconds) {
+            cycleIntervalSeconds = data.scan_interval_seconds;
+          } else if (data.config && (data.config.scan_interval_seconds || data.config.cycle_interval_seconds)) {
+            cycleIntervalSeconds = data.config.scan_interval_seconds || data.config.cycle_interval_seconds;
+          }
+          // NEW: Live cycle countdown and alchemy status (Railway 2026 polish)
+          if (data.next_cycle_in) {
+            nextCycleIn = data.next_cycle_in;
+          }
+          if (typeof data.alchemy_connected === 'boolean') {
+            alchemyConnected = data.alchemy_connected;
+          }
+
+          // Update Alchemy status card
+          updateAlchemyStatus(data);
+
+          // Update Allowance status card
+          updateAllowanceStatus(data);
+
+          // Update USDC Balance card (neu seit 21.03.2026)
+          updateUsdcBalance(data);
+
+          // Update next scan countdown
+          updateNextScan(data);
+        }
+      } catch (err) {
+        // Ignore status errors, use default cycle interval
+      }
+
+      // ── /api/production-safety ────────────────────────────────────────
+      await fetchProductionSafety();
+
+      // ── /api/pnl ──────────────────────────────────────────────────────
+      try {
+        const res = await fetch('/api/pnl');
+        if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+        const data = await res.json();
+        renderPnl(data);
+        pnlOk = true;
+      } catch (err) {
+        errors.push(`PnL: ${err.message}`);
+      }
+
+      // ── /api/positions ────────────────────────────────────────────────
+      try {
+        const res = await fetch('/api/positions');
+        if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+        const data = await res.json();
+        // Accept both array and { positions: [...] }
+        const rows = Array.isArray(data) ? data : (data.positions || []);
+        renderPositions(rows);
+        posOk = true;
+      } catch (err) {
+        errors.push(`Positions: ${err.message}`);
+        // Show error state in table
+        document.getElementById('positions-tbody').innerHTML = `
+          <tr>
+            <td colspan="7" class="px-4 py-8 text-center text-red-500 text-sm">
+              Failed to load positions — ${escHtml(err.message)}
+            </td>
+          </tr>`;
+      }
+
+      // ── Status & timestamp ────────────────────────────────────────────
+      if (errors.length > 0) {
+        setStatus('error');
+        showError(errors.join(' | '));
+      } else {
+        setStatus('ok');
+        hideError();
+      }
+
+      const now = new Date();
+      document.getElementById('last-updated').textContent =
+        now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+      startCountdown();
+    }
+
+    // ── Boot ───────────────────────────────────────────────────────────────
+    fetchAll();
+  </script>
+</body>
+</html>

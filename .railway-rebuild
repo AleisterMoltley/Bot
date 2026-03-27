@@ -1,0 +1,19 @@
+# This file triggers Railway rebuilds when modified
+# Increment the version or change the timestamp to force a fresh build
+#
+# Current version: 31
+# Last modified: 2026-03-19T14:00:00Z
+# Reason: Repository cleanup - professional documentation
+#
+# Changes in v31:
+# - UPDATED: Professional README with clear Railway/Vercel setup
+# - UPDATED: All documentation manuals (ES, FR, RU, PL, AR)
+# - CLEANUP: Removed outdated references from all files
+#
+# Current architecture:
+# - Pure FastAPI server backend on Railway
+# - Amsterdam region for Polymarket geo-bypass
+# - Ferox Next.js Dashboard frontend on Vercel
+#
+version=31
+# Cache buster: 2026-03-19T14:00:00Z-repo-cleanup-professional-docs
