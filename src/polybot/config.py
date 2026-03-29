@@ -134,14 +134,18 @@ FEE_DEFAULTS = {
     "negrisk_funding_daily_bps": 2,
 }
 
-# Kelly Criterion Defaults (position sizing math)
-# EXECUTION FIX v3: min_trade_usd lowered to 1.0
+# Kelly Criterion Defaults for 5-min binary markets
+# win_pct: net win as fraction of stake (~0.94 for Polymarket binary after ~2% fee on avg $0.5 token)
+# loss_pct: fraction of stake lost on loss = 1.0 (full stake)
+# max_fraction: cap Kelly fraction at 15% of bankroll (conservative for volatile 5-min markets)
+# sizing_multiplier: half-Kelly is standard for volatile markets
+# min_trade_usd: Polymarket minimum effective order size
 KELLY_DEFAULTS = {
-    "avg_win_pct": 0.07,
-    "avg_loss_pct": 0.04,
-    "max_fraction": 0.25,
-    "sizing_multiplier": 0.5,  # Half-Kelly
-    "min_trade_usd": 1.0,  # EXECUTION FIX v3: Lowered from 3.0
+    "avg_win_pct": 0.94,    # net win ≈ 94% of stake (binary payout minus ~2% fee)
+    "avg_loss_pct": 1.00,   # lose full stake on loss
+    "max_fraction": 0.15,   # never bet more than 15% of bankroll per trade
+    "sizing_multiplier": 0.5,  # half-Kelly for safety
+    "min_trade_usd": 1.0,
 }
 
 # Solana Bridge Defaults
@@ -212,6 +216,16 @@ class Settings(BaseSettings):
     # ═══════════════════════════════════════════════════════════════════════════
     #  🚨 RAILWAY REQUIRED - Must be set in Railway environment
     # ═══════════════════════════════════════════════════════════════════════════
+
+    # ── REDEEM-ONLY MODE – Stoppt allen Handel, nur noch Redeem ────
+    redeem_only: bool = Field(
+        default=False,
+        description=(
+            "Wind-down mode: blocks ALL new trades, only redeems already-active positions. "
+            "Set REDEEM_ONLY=true on Railway to stop trading and cash out."
+        ),
+        alias="REDEEM_ONLY",
+    )
 
     # ── PRODUCTION DEFAULTS – Bot tradet jetzt wirklich ────────────
     # PATCH 2026: Changed defaults for production trading
@@ -513,8 +527,8 @@ class Settings(BaseSettings):
 
     # ── Risk Management ────────────────────────────────────────────
     max_daily_loss: float = Field(
-        default=999.0,  # FORCED EXECUTION v5: Increased from 25
-        description="Maximum daily loss limit in USD (FORCED EXECUTION v5: high limit)",
+        default=25.0,
+        description="Maximum daily loss limit in USD",
         ge=0,
     )
     max_position_size_pct: float = Field(
@@ -537,8 +551,8 @@ class Settings(BaseSettings):
         alias="MAX_CONCURRENT_POSITIONS",
     )
     circuit_breaker_consecutive_losses: int = Field(
-        default=20,  # FORCED EXECUTION v5: Increased from 3
-        description="Consecutive losses to trigger circuit breaker (FORCED EXECUTION v5: high limit)",
+        default=5,
+        description="Consecutive losses to trigger circuit breaker (15min cooldown)",
         ge=1,
     )
     max_category_exposure: float = Field(
@@ -659,6 +673,18 @@ class Settings(BaseSettings):
         ge=0,
         le=100,
         alias="REDEEM_GAS_BUFFER_PERCENT",
+    )
+
+    # ── Startup Redeem All V90 ────────────────────────────────────────
+    # On restart, scan the wallet for ALL positions via Data API and redeem
+    # every redeemable one — including positions not tracked in internal state.
+    startup_redeem_all: bool = Field(
+        default=True,
+        description=(
+            "On startup, scan wallet for ALL redeemable positions and redeem them. "
+            "Catches positions the bot lost track of after restart or state loss."
+        ),
+        alias="STARTUP_REDEEM_ALL",
     )
 
     # ═══════════════════════════════════════════════════════════════════════════

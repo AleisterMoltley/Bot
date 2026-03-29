@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from web3 import Web3
@@ -2948,3 +2948,239 @@ class TestV88SharedExecutor:
         finally:
             # Cleanup
             module._shared_executor_instance = original_instance
+
+
+# ── V90: Tests for scan_and_redeem_all_positions ─────────────────────────────
+
+
+def _make_aiohttp_mocks(response_data, status=200):
+    """Build mock aiohttp session + response as async context managers."""
+    mock_resp = MagicMock()
+    mock_resp.status = status
+    mock_resp.json = AsyncMock(return_value=response_data)
+
+    # Make response an async context manager
+    resp_ctx = AsyncMock()
+    resp_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
+    resp_ctx.__aexit__ = AsyncMock(return_value=None)
+
+    mock_session = MagicMock()
+    mock_session.get = MagicMock(return_value=resp_ctx)
+
+    # Make session itself an async context manager
+    session_ctx = MagicMock()
+    session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+    session_ctx.__aexit__ = AsyncMock(return_value=None)
+
+    return session_ctx
+
+
+class TestScanAndRedeemAllPositions:
+    """V90: Tests for the startup wallet position scan and redeem."""
+
+    FAKE_PK = "0x" + "ab" * 32
+
+    def _make_executor(self):
+        """Create a minimal OnchainExecutor with mocked internals."""
+        exe = OnchainExecutor.__new__(OnchainExecutor)
+        exe.private_key = self.FAKE_PK
+        exe.account = MagicMock()
+        exe.wallet = "0x" + "1" * 40
+        exe.rpc_url = ""
+        exe.w3 = MagicMock()
+        exe.open_positions = {}
+        exe.monitor_task = None
+        exe.redeemed_conditions = set()
+        return exe
+
+    @pytest.mark.asyncio
+    async def test_no_wallet_returns_empty(self):
+        """Returns early with zeros when no wallet is configured."""
+        exe = self._make_executor()
+        exe.wallet = ""
+
+        result = await exe.scan_and_redeem_all_positions()
+
+        assert result["successful"] == 0
+        assert result["failed"] == 0
+        assert result["total_found"] == 0
+
+    @pytest.mark.asyncio
+    async def test_no_redeemable_positions(self):
+        """Returns zeros when Data API reports nothing redeemable."""
+        exe = self._make_executor()
+        exe.get_usdc_balance = MagicMock(return_value=5.0)
+
+        session_ctx = _make_aiohttp_mocks([])
+
+        with patch("aiohttp.ClientSession", return_value=session_ctx):
+            result = await exe.scan_and_redeem_all_positions()
+
+        assert result["total_found"] == 0
+        assert result["successful"] == 0
+        assert result["failed"] == 0
+
+    @pytest.mark.asyncio
+    async def test_redeems_redeemable_positions(self):
+        """Successfully redeems positions returned by Data API."""
+        exe = self._make_executor()
+        exe.get_usdc_balance = MagicMock(return_value=5.0)
+
+        # Mock redeem_winning_positions to succeed
+        exe.redeem_winning_positions = AsyncMock(return_value={"status": 1})
+
+        api_response = [
+            {
+                "conditionId": "0xaaa",
+                "outcomeIndex": 0,
+                "redeemable": True,
+                "title": "Market A",
+            },
+            {
+                "conditionId": "0xbbb",
+                "outcomeIndex": 1,
+                "redeemable": True,
+                "title": "Market B",
+            },
+            {
+                "conditionId": "0xccc",
+                "outcomeIndex": 0,
+                "redeemable": False,
+                "title": "Market C",
+            },
+        ]
+
+        session_ctx = _make_aiohttp_mocks(api_response)
+
+        with patch("aiohttp.ClientSession", return_value=session_ctx):
+            result = await exe.scan_and_redeem_all_positions()
+
+        # Only 2 redeemable positions (0xccc has redeemable=False)
+        assert result["total_found"] == 2
+        assert result["successful"] == 2
+        assert result["failed"] == 0
+
+    @pytest.mark.asyncio
+    async def test_handles_redeem_failure(self):
+        """Counts failed redeems correctly."""
+        exe = self._make_executor()
+        exe.get_usdc_balance = MagicMock(return_value=5.0)
+
+        exe.redeem_winning_positions = AsyncMock(
+            side_effect=RuntimeError("redeem failed")
+        )
+
+        api_response = [
+            {
+                "conditionId": "0xaaa",
+                "outcomeIndex": 0,
+                "redeemable": True,
+                "title": "Market A",
+            },
+        ]
+
+        session_ctx = _make_aiohttp_mocks(api_response)
+
+        with patch("aiohttp.ClientSession", return_value=session_ctx):
+            result = await exe.scan_and_redeem_all_positions()
+
+        assert result["total_found"] == 1
+        assert result["successful"] == 0
+        assert result["failed"] == 1
+
+    @pytest.mark.asyncio
+    async def test_already_known_treated_as_success(self):
+        """'already known' nonce collision errors count as success."""
+        exe = self._make_executor()
+        exe.get_usdc_balance = MagicMock(return_value=5.0)
+
+        exe.redeem_winning_positions = AsyncMock(
+            side_effect=Exception("Transaction already known in mempool")
+        )
+
+        api_response = [
+            {
+                "conditionId": "0xaaa",
+                "outcomeIndex": 0,
+                "redeemable": True,
+                "title": "Market A",
+            },
+        ]
+
+        session_ctx = _make_aiohttp_mocks(api_response)
+
+        with patch("aiohttp.ClientSession", return_value=session_ctx):
+            result = await exe.scan_and_redeem_all_positions()
+
+        assert result["successful"] == 1
+        assert result["failed"] == 0
+
+    @pytest.mark.asyncio
+    async def test_skips_position_without_condition_id(self):
+        """Positions without conditionId are counted as failed."""
+        exe = self._make_executor()
+        exe.get_usdc_balance = MagicMock(return_value=5.0)
+
+        api_response = [
+            {"outcomeIndex": 0, "redeemable": True, "title": "No ID Market"},
+        ]
+
+        session_ctx = _make_aiohttp_mocks(api_response)
+
+        with patch("aiohttp.ClientSession", return_value=session_ctx):
+            result = await exe.scan_and_redeem_all_positions()
+
+        assert result["total_found"] == 1
+        assert result["successful"] == 0
+        assert result["failed"] == 1
+
+    @pytest.mark.asyncio
+    async def test_data_api_error_returns_empty(self):
+        """Handles Data API errors gracefully."""
+        exe = self._make_executor()
+        exe.get_usdc_balance = MagicMock(return_value=5.0)
+
+        session_ctx = _make_aiohttp_mocks(None, status=500)
+
+        with patch("aiohttp.ClientSession", return_value=session_ctx):
+            result = await exe.scan_and_redeem_all_positions()
+
+        assert result["total_found"] == 0
+        assert result["successful"] == 0
+
+    @pytest.mark.asyncio
+    async def test_outcome_index_mapping(self):
+        """outcomeIndex 0 maps to 'up', 1 maps to 'down'."""
+        exe = self._make_executor()
+        exe.get_usdc_balance = MagicMock(return_value=5.0)
+
+        outcomes_called = []
+
+        async def tracking_redeem(condition_id, winning_outcome):
+            outcomes_called.append((condition_id, winning_outcome))
+            return {"status": 1}
+
+        exe.redeem_winning_positions = tracking_redeem
+
+        api_response = [
+            {
+                "conditionId": "0xaaa",
+                "outcomeIndex": 0,
+                "redeemable": True,
+                "title": "UP",
+            },
+            {
+                "conditionId": "0xbbb",
+                "outcomeIndex": 1,
+                "redeemable": True,
+                "title": "DOWN",
+            },
+        ]
+
+        session_ctx = _make_aiohttp_mocks(api_response)
+
+        with patch("aiohttp.ClientSession", return_value=session_ctx):
+            await exe.scan_and_redeem_all_positions()
+
+        assert ("0xaaa", "up") in outcomes_called
+        assert ("0xbbb", "down") in outcomes_called

@@ -69,32 +69,57 @@ def calc_kelly_size(
     confidence: float,
     balance: float,
     base_trade_amount: float,
+    win_pct_override: float | None = None,
+    loss_pct_override: float | None = None,
 ) -> dict:
     """Calculate Kelly criterion position size.
 
-    Returns dict with 'size' (USD) and 'edge' (%).
+    Args:
+        confidence: Signal confidence in range 0-100 (e.g. 67.0 for 67%)
+        balance: Current wallet balance in USD
+        base_trade_amount: Base trade size for cap calculation
+        win_pct_override: Override default win% (for backtested values)
+        loss_pct_override: Override default loss% (for backtested values)
+
+    Returns:
+        dict with 'size' (USD), 'edge' (%), 'kelly_fraction'.
+
+    Notes:
+        For 5-min binary markets, a win = full payout (~1.0x) minus fee,
+        a loss = full stake lost. Default win/loss based on Polymarket
+        5-min market typical payouts (market fee ~2%).
     """
     settings = get_settings()
-    win_pct = settings.kelly_avg_win_pct
-    loss_pct = settings.kelly_avg_loss_pct
-    max_frac = settings.kelly_max_fraction
-    min_trade = settings.kelly_min_trade_usd
-    slippage = 0.005
 
-    win_prob = confidence / 100.0
+    # Confidence normalised to [0, 1]
+    win_prob = max(0.0, min(1.0, confidence / 100.0))
     lose_prob = 1.0 - win_prob
+
+    # Win/loss pcts: how much you win/lose as fraction of stake
+    # For binary 5-min markets: win ≈ 0.94 (approx net after ~2% fee on ~$0.5 UP token)
+    # loss = 1.0 (full stake lost)
+    win_pct = win_pct_override if win_pct_override is not None else settings.kelly_avg_win_pct
+    loss_pct = loss_pct_override if loss_pct_override is not None else settings.kelly_avg_loss_pct
+
+    slippage = 0.005  # estimated slippage
+
+    # Kelly edge = E[return] = p*win - (1-p)*loss - slippage
     edge = (win_prob * win_pct) - (lose_prob * loss_pct) - slippage
 
     if edge <= 0:
-        return {"size": min_trade, "edge": edge * 100, "kelly_fraction": 0}
+        # Negative edge: trade minimum only if confidence >= 0.55 (weak signal still valid)
+        min_trade = settings.kelly_min_trade_usd
+        return {"size": min_trade, "edge": round(edge * 100, 2), "kelly_fraction": 0.0}
 
-    kelly_f = edge / win_pct if win_pct > 0 else 0
-    kelly_f = min(kelly_f, max_frac)
+    # Kelly fraction: f = edge / win_pct (simplified Kelly for binary outcomes)
+    kelly_f = edge / win_pct if win_pct > 0 else 0.0
+    kelly_f = min(kelly_f, settings.kelly_max_fraction)
 
     size = balance * kelly_f
-    size = max(size, min_trade)
-    size = min(size, base_trade_amount * 3)  # cap at 3x base
-    size = min(size, balance * 0.25)  # never more than 25% of balance
+    # Bounds
+    size = max(size, settings.kelly_min_trade_usd)
+    size = min(size, base_trade_amount * 2.5)   # cap at 2.5x base (tighter than before)
+    size = min(size, balance * 0.20)             # never more than 20% of balance
 
     return {
         "size": round(size, 2),
@@ -243,7 +268,18 @@ async def place_trade_async(
     Returns:
         Order result dict or None
     """
-    dry_run = dry_run if dry_run is not None else get_settings().dry_run
+    _settings = get_settings()
+    dry_run = dry_run if dry_run is not None else _settings.dry_run
+
+    if getattr(_settings, "redeem_only", False) is True:
+        log.info(
+            "🛑 REDEEM_ONLY mode – trade blocked, only redemptions allowed",
+            amount=amount,
+            outcome=outcome,
+            market=market.get("question", "")[:60] if market else "",
+        )
+        return {"status": "skipped", "reason": "redeem_only"}
+
     # Always call _prepare_trade_params for current_price; override token_id
     # only when caller provides a pre-resolved one (V21 Up-token path).
     resolved_token_id, current_price = _prepare_trade_params(market, outcome)

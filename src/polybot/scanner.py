@@ -21,7 +21,6 @@ import asyncio
 import json
 import logging
 import os
-import random
 
 import re
 import time
@@ -40,6 +39,7 @@ from polybot.proxy import (
 from polybot.logging_setup import get_logger
 from polybot.onchain_executor import _fetch_order_book
 from polybot.signal_engine import get_signal_engine
+from polybot.risk_manager import get_risk_manager
 
 logger = get_logger(__name__)
 
@@ -635,36 +635,50 @@ def fetch_all_active_markets(min_volume: float = 10_000) -> list[dict]:
 
 
 async def fetch_all_active_markets_async(min_volume: float = 10_000) -> list[dict]:
-    """Fetch active 5-minute updown markets and execute trades via ClobClient."""
+    """Fetch active 5-minute updown markets and execute trades via ClobClient.
+
+    Improvements:
+    - Risk manager gate before every trade (circuit breaker, daily limits)
+    - Signal confidence gating: only trade when signal.confidence >= MIN_SIGNAL_CONF
+    - No random fallback: skip trade if no valid signal and no clear price edge
+    - Kelly sizing based on actual balance + signal confidence
+    - Balance update fed to risk manager for drawdown tracking
+    """
     from polybot import executor
+    from polybot.executor import calc_kelly_size
+    from polybot.risk_manager import get_risk_manager
 
-    _TRADE_AMOUNT_USD = 30.0
+    # Minimum confidence to trade a CEX signal (below this → skip, not random)
+    MIN_SIGNAL_CONF = 0.62
+    # Price edge thresholds for fallback (only trade if clear mis-price)
+    PRICE_EDGE_LOW = 0.44   # UP token this cheap → buy UP
+    PRICE_EDGE_HIGH = 0.56  # UP token this expensive → buy DOWN
+    # Base trade amount (Kelly may reduce/increase within limits)
+    BASE_TRADE_USD = 30.0
 
-    # Validate private key is available
     pk = os.getenv("POLYMARKET_PRIVATE_KEY")
     if not pk or len(pk) < 40:
         logger.critical("[STARTUP] POLYMARKET_PRIVATE_KEY missing or too short")
         return []
 
-    # Ensure 0x prefix
     if not pk.startswith("0x"):
         pk = "0x" + pk
         os.environ["POLYMARKET_PRIVATE_KEY"] = pk
 
     logger.info(f"[STARTUP] Private key OK (length={len(pk)})")
 
-    # Start CEX signal engine (connects to Binance WebSockets)
+    # Start CEX signal engine
+    engine = None
     try:
         engine = get_signal_engine()
         if not engine._running:
             asyncio.create_task(engine.start())
-            await asyncio.sleep(2.0)  # Brief warmup before first trade
+            await asyncio.sleep(2.0)
             logger.info("[SIGNAL ENGINE] Started and warming up")
     except Exception as exc:
-        logger.warning(
-            "[SIGNAL ENGINE] Failed to start: %s — falling back to price-based", exc
-        )
-        engine = None
+        logger.warning("[SIGNAL ENGINE] Failed to start: %s — price-based only", exc)
+
+    risk = get_risk_manager()
 
     # === TIMESTAMP SLOT MATH ===
     target_prefixes = [
@@ -711,8 +725,10 @@ async def fetch_all_active_markets_async(min_volume: float = 10_000) -> list[dic
                 except Exception:
                     pass
 
-    # === BUG-2 FIX: Pre-loop balance guard ===
+    # Pre-loop balance check + feed to risk manager for drawdown tracking
     balance = await executor.get_polygon_balance_async()
+    risk.update_balance(balance)
+
     if balance < config.MIN_BALANCE_USD:
         logger.warning(
             "Insufficient USDC balance, skipping entire cycle",
@@ -721,33 +737,30 @@ async def fetch_all_active_markets_async(min_volume: float = 10_000) -> list[dic
         )
         return filtered
 
-    # === TRADE EXECUTION (ClobClient with L2 credentials) ===
+    # === TRADE EXECUTION ===
+    trades_this_cycle = 0
+
     for m in filtered:
         slug = m.get("slug", "")
         if not any(
             coin in slug
-            for coin in [
-                "btc-updown-5m",
-                "eth-updown-5m",
-                "sol-updown-5m",
-                "xrp-updown-5m",
-            ]
+            for coin in ["btc-updown-5m", "eth-updown-5m", "sol-updown-5m", "xrp-updown-5m"]
         ):
             continue
 
-        # === BUG-1 FIX: Skip expired slots ===
         if not is_slot_tradeable(slug):
-            ts = int(slug.split("-")[-1]) if slug.split("-")[-1].isdigit() else 0
-            end_time = ts + SLOT_DURATION
-            logger.debug("Skipping expired slot", slug=slug, end_time=end_time)
+            logger.debug("Skipping expired slot", slug=slug)
             continue
 
-        # === BUG-2 FIX: Skip already-traded slugs ===
         if slug in _traded_slugs:
-            logger.debug("Slug already traded this session, skipping", slug=slug)
+            logger.debug("Already traded this session", slug=slug)
             continue
 
-        logger.info(f"[CYCLE MATCH] {slug}")
+        # === RISK GATE: check before every individual trade ===
+        can_trade, risk_reason = risk.check_can_trade()
+        if not can_trade:
+            logger.warning("[RISK] Trade blocked: %s — stopping cycle", risk_reason)
+            break
 
         clob_raw = m.get("clobTokenIds") or []
         if isinstance(clob_raw, str):
@@ -762,85 +775,113 @@ async def fetch_all_active_markets_async(min_volume: float = 10_000) -> list[dic
             continue
 
         try:
-            # Use orderbook price to determine direction.
-            # If best ask (UP token) is below 0.45, market implies DOWN is more likely → buy UP (contrarian edge).
-            # If best ask (UP token) is above 0.55, market implies UP is more likely → buy DOWN (fade the crowd).
-            # Between 0.45-0.55 we have no edge — randomize.
-            try:
-                book = _fetch_order_book(clob_ids[0])
-                asks = book.get("asks", [])
-                bids = book.get("bids", [])
-                best_ask = float(asks[0]["price"]) if asks else 0.5
-                best_bid = float(bids[0]["price"]) if bids else 0.5
-                up_price = (best_ask + best_bid) / 2
+            # Fetch orderbook for current UP-token mid-price
+            book = _fetch_order_book(clob_ids[0])
+            asks = book.get("asks", [])
+            bids = book.get("bids", [])
+            best_ask = float(asks[0]["price"]) if asks else 0.5
+            best_bid = float(bids[0]["price"]) if bids else 0.5
+            up_price = (best_ask + best_bid) / 2
 
-                # Skip resolved/expired markets
-                if up_price <= 0.02 or up_price >= 0.98:
-                    logger.debug(
-                        "Skipping resolved/expired market token %s (price=%.4f)",
-                        clob_ids[0],
-                        up_price,
-                    )
-                    continue
+            # Skip resolved/expired markets
+            if up_price <= 0.02 or up_price >= 0.98:
+                logger.debug("Skipping resolved market %s (price=%.4f)", clob_ids[0], up_price)
+                continue
 
-                # === CEX SIGNAL ENGINE ===
-                # Determine asset from slug (btc-updown-5m-... → BTC)
-                asset_map = {"btc": "BTC", "eth": "ETH", "sol": "SOL", "xrp": "XRP"}
-                asset = next((v for k, v in asset_map.items() if k in slug), None)
+            # Liquidity check
+            liquidity = float(m.get("liquidity", 0) or 0)
+            liq_ok, liq_reason = risk.check_liquidity(liquidity)
+            if not liq_ok:
+                logger.debug("[RISK] %s: %s", slug, liq_reason)
+                continue
 
-                signal = None
-                if asset and engine is not None:
-                    try:
-                        signal = engine.get_signal(asset, polymarket_up_price=up_price)
-                    except Exception as sig_err:
-                        logger.debug(
-                            "[SIGNAL ENGINE] Error getting signal: %s", sig_err
-                        )
+            # === CEX SIGNAL ENGINE ===
+            asset_map = {"btc": "BTC", "eth": "ETH", "sol": "SOL", "xrp": "XRP"}
+            asset = next((v for k, v in asset_map.items() if k in slug), None)
 
-                if signal and signal.is_valid:
-                    side = signal.direction
-                    logger.info(
-                        "[SIGNAL ENGINE] %s → %s (conf=%.2f) reason=%s | PM_UP=$%.3f",
-                        asset,
-                        side.upper(),
-                        signal.confidence,
-                        signal.reason,
-                        up_price,
-                    )
-                elif up_price < 0.45:
-                    side = "up"  # Price-based fallback
-                elif up_price > 0.55:
-                    side = "down"  # Price-based fallback
-                else:
-                    side = "up" if random.random() < 0.5 else "down"  # No edge → 50/50
+            signal = None
+            if asset and engine is not None:
+                try:
+                    signal = engine.get_signal(asset, polymarket_up_price=up_price)
+                except Exception as sig_err:
+                    logger.debug("[SIGNAL ENGINE] Error: %s", sig_err)
 
-            except Exception:
-                side = "up" if random.random() < 0.5 else "down"
+            # === DIRECTION DECISION (strict — no random fallback) ===
+            side = None
+            trade_confidence = 0.5
+
+            if signal and signal.is_valid and signal.confidence >= MIN_SIGNAL_CONF:
+                # CEX signal has edge
+                side = signal.direction
+                trade_confidence = signal.confidence
+                logger.info(
+                    "[SIGNAL] %s → %s (conf=%.2f) %s | PM_UP=$%.3f",
+                    asset, side.upper(), signal.confidence, signal.reason, up_price,
+                )
+            elif up_price < PRICE_EDGE_LOW:
+                # Clear price mis-pricing: UP token cheap, buy UP
+                side = "up"
+                trade_confidence = 0.58
+                logger.info("[PRICE EDGE] %s UP cheap (%.3f < %.2f) → buy UP", slug, up_price, PRICE_EDGE_LOW)
+            elif up_price > PRICE_EDGE_HIGH:
+                # Clear price mis-pricing: UP token expensive, buy DOWN
+                side = "down"
+                trade_confidence = 0.58
+                logger.info("[PRICE EDGE] %s UP expensive (%.3f > %.2f) → buy DOWN", slug, up_price, PRICE_EDGE_HIGH)
+            else:
+                # No edge identified — skip, do not trade randomly
+                logger.debug("[NO EDGE] %s up_price=%.3f signal=%s — skipping", slug, up_price,
+                             signal.reason if signal else "none")
+                continue
+
+            # === KELLY SIZING based on actual balance + signal confidence ===
+            kelly = calc_kelly_size(
+                confidence=trade_confidence * 100,  # expects 0-100
+                balance=balance,
+                base_trade_amount=BASE_TRADE_USD,
+            )
+            trade_amount = kelly["size"]
+
+            size_ok, size_reason = risk.check_trade_size(trade_amount)
+            if not size_ok:
+                logger.debug("[RISK] %s: %s", slug, size_reason)
+                continue
+
             token_id = clob_ids[0] if side == "up" else clob_ids[1]
+
+            logger.info(
+                "[TRADE] %s %s $%.2f (kelly_edge=%.1f%% kelly_f=%.4f)",
+                slug, side.upper(), trade_amount, kelly["edge"], kelly["kelly_fraction"],
+            )
 
             result = await executor.place_trade_async(
                 market=m,
                 outcome=side,
-                amount=_TRADE_AMOUNT_USD,
+                amount=trade_amount,
                 token_id=token_id,
             )
+
             if result:
-                logger.info(
-                    f"[TRADE SUCCESS] {slug} amount={_TRADE_AMOUNT_USD} outcome={side.capitalize()}"
-                )
+                logger.info("[TRADE SUCCESS] %s $%.2f %s", slug, trade_amount, side.upper())
                 _traded_slugs.add(slug)
+                trades_this_cycle += 1
+                # Record as pending — actual P&L resolved when market closes
+                # Conservative: assume 0 until PnL tracker updates
+                risk.record_trade(profit=0)
             else:
-                logger.error(f"[TRADE FAILED] {slug} result was None")
+                logger.error("[TRADE FAILED] %s result was None", slug)
+                risk.record_trade(profit=-trade_amount)  # pessimistic: count as loss
 
         except Exception as e:
             import traceback
-
-            logger.error(f"[TRADE ERROR] {slug}: {type(e).__name__} - {str(e)[:400]}")
-            logger.error(f"[FULL TRACEBACK]\n{traceback.format_exc()}")
+            logger.error("[TRADE ERROR] %s: %s", slug, str(e)[:400])
+            logger.error("[FULL TRACEBACK]\n%s", traceback.format_exc())
             continue
 
-        # === BUG-2 FIX: Refresh balance after each trade, stop when broke ===
+        # Refresh balance after trade, update risk manager
         balance = await executor.get_polygon_balance_async()
+        risk.update_balance(balance)
+
         if balance < config.MIN_BALANCE_USD:
             logger.warning(
                 "Balance too low after trade, stopping cycle",
@@ -849,7 +890,10 @@ async def fetch_all_active_markets_async(min_volume: float = 10_000) -> list[dic
             )
             break
 
-    logger.info(f"✅ {len(filtered)} markets processed")
+    logger.info(
+        "Cycle complete: %d markets found, %d trades executed",
+        len(filtered), trades_this_cycle,
+    )
     return filtered
 
 
@@ -1743,6 +1787,7 @@ async def execute_auto_trades_async(
 
     Only executes when auto_execute=True AND dry_run=False in settings.
     Uses Kelly Criterion for position sizing with configurable multiplier.
+    Risk manager gates every trade (circuit breaker, daily loss, drawdown).
 
     Args:
         opportunities: List of high-EV market opportunities from scanner
@@ -1753,39 +1798,37 @@ async def execute_auto_trades_async(
     """
     from polybot.config import get_settings
     from polybot.risk import calculate_kelly_position
+    from polybot.risk_manager import get_risk_manager
 
     settings = get_settings()
+    risk = get_risk_manager()
     results: list[dict] = []
 
-    # ===================================================================
-    # V9 FINAL: STARTUP VALIDATION
-    # Log key settings at function entry for debugging/monitoring
-    # ===================================================================
     logger.info(
-        "V9 STARTUP VALIDATION",
+        "execute_auto_trades_async",
         mode=settings.mode,
         dry_run=settings.dry_run,
         min_ev=settings.min_ev,
         max_position=settings.max_position_usd,
-        adaptive_scaling=settings.adaptive_scaling,
+        opportunities=len(opportunities),
     )
 
-    # Safety check: Only execute when both flags are enabled
     if not settings.auto_execute:
         logger.debug("Auto-execute disabled (AUTO_EXECUTE=false)")
         return results
 
     if settings.dry_run:
-        logger.info(
-            "Auto-trade in DRY RUN mode — trades will be simulated",
-            auto_execute=settings.auto_execute,
-            dry_run=settings.dry_run,
-        )
+        logger.info("Auto-trade in DRY RUN mode", dry_run=True)
 
-    # Import executor for trade placement
     from polybot.executor import place_trade_async
 
     for market_opp in opportunities[:max_trades]:
+        # Risk gate before every trade
+        can_trade, risk_reason = risk.check_can_trade()
+        if not can_trade:
+            logger.warning("[RISK] Auto-trade blocked: %s", risk_reason)
+            break
+
         try:
             raw_market = market_opp.get("raw_market", {})
             edge = market_opp.get("edge", 0)
@@ -1793,108 +1836,60 @@ async def execute_auto_trades_async(
             liquidity = market_opp.get("liquidity", 0)
             question = market_opp.get("market", "")[:60]
 
-            # Get balance for Kelly calculation
-            # Default fallback used when balance_usd not provided (sizing reference only)
-            DEFAULT_BANKROLL_USD = 100.0
-            bankroll = raw_market.get("balance_usd")
-            if bankroll is None:
-                bankroll = DEFAULT_BANKROLL_USD
-                logger.debug(
-                    "Using default bankroll for Kelly sizing",
-                    default=DEFAULT_BANKROLL_USD,
-                    market=question,
-                )
-
-            # Check if EV meets minimum threshold
-            if ev < settings.min_edge_percent / 100:
-                log_rejection(
-                    raw_market,
-                    f"EV too low for auto-trade ({ev:.2%} < {settings.min_edge_percent / 100:.2%})",
-                    edge,
-                    ev,
-                    liquidity,
-                )
+            # Liquidity check
+            liq_ok, liq_reason = risk.check_liquidity(liquidity)
+            if not liq_ok:
+                logger.debug("[RISK] %s: %s", question, liq_reason)
                 continue
 
-            # Calculate Kelly position size
+            DEFAULT_BANKROLL_USD = 100.0
+            bankroll = raw_market.get("balance_usd") or DEFAULT_BANKROLL_USD
+
+            if ev < settings.min_edge_percent / 100:
+                log_rejection(raw_market, f"EV too low ({ev:.2%} < {settings.min_edge_percent / 100:.2%})", edge, ev, liquidity)
+                continue
+
             kelly_size = calculate_kelly_position(
                 edge=abs(edge),
                 bankroll=bankroll,
                 kelly_mult=settings.kelly_multiplier,
             )
 
-            # Skip trade if Kelly returns 0 (no edge or negative edge)
             if kelly_size <= 0:
-                log_rejection(
-                    raw_market,
-                    "Kelly position size is zero (no edge)",
-                    edge,
-                    ev,
-                    liquidity,
-                )
+                log_rejection(raw_market, "Kelly=0 (no edge)", edge, ev, liquidity)
                 continue
 
-            # ===================================================================
-            # V7 BONUS: Auto-Position-Scaling
-            # Scale position based on edge quality: better edge → larger position
-            # Formula: scaled_position = kelly_size * scaling_factor * (edge / BASELINE_EDGE)
-            # ===================================================================
-            edge_ratio = abs(edge) / BASELINE_EDGE  # 2% edge = 1.0 ratio (baseline)
+            edge_ratio = abs(edge) / BASELINE_EDGE
             scaled_position = kelly_size * settings.position_scaling_factor * edge_ratio
 
-            # Apply position limits (min and max) only when Kelly > 0
+            if settings.adaptive_scaling and ev > settings.min_ev:
+                scaled_position = scaled_position * (1 + (abs(edge) * 2))
+
             position_usd = max(scaled_position, settings.min_trade_usd)
             position_usd = min(position_usd, settings.max_position_usd)
 
-            # ===================================================================
-            # V9 FINAL: ADAPTIVE RISK SCALING
-            # Slightly increase position size when edge quality is above threshold
-            # Formula: position_usd = position_usd * (1 + (edge * 2))
-            # ===================================================================
-            if settings.adaptive_scaling and ev > settings.min_ev:
-                position_usd = position_usd * (1 + (abs(edge) * 2))
-                # Re-apply both limits after scaling for safety
-                position_usd = max(position_usd, settings.min_trade_usd)
-                position_usd = min(position_usd, settings.max_position_usd)
+            size_ok, size_reason = risk.check_trade_size(position_usd)
+            if not size_ok:
+                logger.debug("[RISK] %s: %s", question, size_reason)
+                continue
 
-            # Determine trade side (YES if edge positive, NO if negative)
             side = "YES" if edge > 0 else "NO"
-
-            # ===================================================================
-            # V6 BONUS: ULTIMATIVER TRADE-DECISION-LOG (maximale Transparenz)
-            # Zeigt exakt: Balance, Risk %, Confidence, Kelly-Size, Final Position
-            # ===================================================================
+            risk_percent = (position_usd / bankroll) * 100 if bankroll > 0 else 0
             trade_mode = "DRY RUN" if settings.dry_run else "REAL"
-            current_balance = bankroll  # Use the bankroll we already have
-            risk_percent = (
-                (position_usd / current_balance) * 100 if current_balance > 0 else 0
-            )
-            # Note: daily_risk_used tracking not yet implemented - placeholder for future extension
-            daily_risk_used = 0.0
 
             logger.info(
-                f"🚀 EXECUTING {trade_mode} TRADE – V7 ULTIMATE DECISION LOG",
+                f"EXECUTING {trade_mode} TRADE",
                 market=question[:80],
                 edge=round(edge, 4),
                 ev=round(ev, 4),
-                current_balance=round(current_balance, 2),
+                bankroll=round(bankroll, 2),
                 kelly_size=round(kelly_size, 2),
-                scaled_position=round(scaled_position, 2),
                 position_usd=round(position_usd, 2),
-                scaling_factor=settings.position_scaling_factor,
-                edge_ratio=round(edge_ratio, 2),
-                risk_percent=round(risk_percent, 2),
-                daily_risk_used_placeholder=round(daily_risk_used, 2),
-                max_daily_risk=settings.max_daily_risk_usd,
+                risk_pct=round(risk_percent, 2),
                 confidence="HIGH" if abs(edge) > 0.03 else "MEDIUM",
                 side=side,
-                min_ev_threshold=settings.min_ev,
-                auto_execute=settings.auto_execute,
-                dry_run=settings.dry_run,
-                aggressive_mode=settings.aggressive_mode,
             )
 
-            # Execute trade
             trade_result = await place_trade_async(
                 market=raw_market,
                 outcome=side.lower(),
@@ -1902,115 +1897,41 @@ async def execute_auto_trades_async(
                 dry_run=settings.dry_run,
             )
 
-            results.append(
-                {
-                    "market": question,
-                    "side": side,
-                    "position_usd": round(position_usd, 2),
-                    "edge": round(edge, 4),
-                    "ev": round(ev, 4),
-                    "result": trade_result,
-                    "status": "executed" if trade_result else "failed",
-                }
-            )
+            if trade_result:
+                risk.record_trade(profit=0)  # actual P&L updated by pnl_tracker
+            else:
+                risk.record_trade(profit=-position_usd)
+
+            results.append({
+                "market": question,
+                "side": side,
+                "position_usd": round(position_usd, 2),
+                "edge": round(edge, 4),
+                "ev": round(ev, 4),
+                "result": trade_result,
+                "status": "executed" if trade_result else "failed",
+            })
 
         except Exception as e:
-            logger.error(
-                "Auto-trade execution failed",
-                market=market_opp.get("market", "")[:60],
-                error=str(e),
-            )
-            results.append(
-                {
-                    "market": market_opp.get("market", "")[:60],
-                    "status": "error",
-                    "error": str(e),
-                }
-            )
+            logger.error("Auto-trade execution failed", market=market_opp.get("market", "")[:60], error=str(e))
+            results.append({"market": market_opp.get("market", "")[:60], "status": "error", "error": str(e)})
 
-    if results:
-        logger.info(
-            "Auto-trade execution complete",
-            trades_attempted=len(results),
-            successful=[r for r in results if r.get("status") == "executed"],
-        )
-
-    # ===================================================================
-    # V7 BONUS: Scan Summary Log
-    # Provides overview of scan results with daily risk reset status
-    # ===================================================================
     successful_trades = len([r for r in results if r.get("status") == "executed"])
     failed_trades = len([r for r in results if r.get("status") in ("failed", "error")])
     best_ev = max([opp.get("ev", 0) for opp in opportunities], default=0)
-    # Check if daily reset has occurred: current hour >= reset hour means reset is done for today
-    current_hour = datetime.utcnow().hour
-    daily_reset_status = (
-        "done" if current_hour >= settings.daily_risk_reset_hour else "pending"
-    )
 
     logger.info(
-        "📊 SCAN SUMMARY V7",
+        "SCAN SUMMARY",
         opportunities_found=len(opportunities),
         trades_executed=successful_trades,
         trades_failed=failed_trades,
         best_ev=round(best_ev, 4),
-        scaling_factor=settings.position_scaling_factor,
-        daily_risk_reset=daily_reset_status,
-        daily_risk_reset_hour=settings.daily_risk_reset_hour,
+        risk_state=risk.get_status_dict(),
     )
-
-    # === TEST LOG: Zeigt klar, ob der Scan überhaupt Opportunities findet ===
-    if len(opportunities) == 0:
-        logger.warning(
-            "TEST: NO OPPORTUNITY FOUND AFTER SCAN",
-            message="Filter hat Märkte gefunden, aber KEINE mit EV > 0.005. Entweder Markt zu effizient oder Filter noch zu streng.",
-            min_ev_used=settings.min_ev,
-        )
-    else:
-        logger.info("TEST: OPPORTUNITIES FOUND", count=len(opportunities))
-
-    # ===================================================================
-    # V8 BONUS: INTERNAL TRADE JOURNAL + STARTUP VALIDATION
-    # ===================================================================
-    # 100% intern – keine externen Dienste
-    # Schreibt täglich eine JSON-Zusammenfassung + prüft Config bei Start
-    # ===================================================================
-    if len(opportunities) > 0:
-        journal_entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "scan_summary": {
-                "opportunities_found": len(opportunities),
-                "trades_executed": successful_trades,
-                "trades_failed": failed_trades,
-                "best_ev": round(best_ev, 4),
-            },
-        }
-        try:
-            with open(settings.trade_journal_path, "a") as f:
-                f.write(json.dumps(journal_entry) + "\n")
-            logger.info("V8 INTERNAL JOURNAL UPDATED", path=settings.trade_journal_path)
-        except Exception as e:
-            logger.warning("V8 JOURNAL WRITE FAILED", error=str(e))
-
-    # ===================================================================
-    # V9 FINAL: TÄGLICHER TEXT-LOG
-    # Writes a simple text summary line for monitoring
-    # 100% internal – nur lokale .txt Datei
-    # ===================================================================
-    summary_line = (
-        f"{datetime.now(timezone.utc).isoformat()} | "
-        f"Opportunities: {len(opportunities)} | "
-        f"Best EV: {best_ev:.4f} | "
-        f"Trades: {successful_trades}\n"
-    )
-    try:
-        with open(settings.daily_summary_txt, "a") as f:
-            f.write(summary_line)
-        logger.info("V9 DAILY SUMMARY TXT UPDATED", path=settings.daily_summary_txt)
-    except Exception as e:
-        logger.warning("V9 TXT WRITE FAILED", error=str(e))
-
     return results
+
+
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -6,6 +6,12 @@ Connects to Binance WebSocket feeds to detect:
 2. Liquidation Cascades: forced moves with 80%+ directional probability
 3. Latency Arbitrage: CEX price moved but Polymarket hasn't caught up yet
 
+OFI uses Binance FUTURES depth (more reactive, thinner book = faster signals).
+True delta-OFI: tracks bid/ask size changes at best levels, not total volume.
+
+Latency Arb uses adaptive time windows (5s/10s/15s/30s) with confidence
+scaled by how quickly Polymarket has historically lagged CEX price moves.
+
 This gives the bot a 15-90 second edge over Polymarket crowd pricing.
 """
 
@@ -37,17 +43,21 @@ BINANCE_SYMBOLS = {
 
 # Signal thresholds
 LIQUIDATION_CASCADE_USD = 3_000_000  # $3M liquidations in 10s = cascade
-OFI_STRONG_THRESHOLD = 1.5  # OFI score for strong signal
-OFI_WEAK_THRESHOLD = 0.8  # OFI score for weak signal
-LATENCY_ARB_DELTA = 0.0025  # 0.25% price move on CEX
-LATENCY_ARB_POLY_MAX = 0.57  # Polymarket price must be < this (not yet reacted)
-LATENCY_ARB_POLY_MIN = 0.43  # Polymarket price must be > this
+OFI_STRONG_THRESHOLD = 0.35   # True delta-OFI ratio for strong signal (futures book)
+OFI_WEAK_THRESHOLD = 0.18     # True delta-OFI ratio for weak signal
+LATENCY_ARB_DELTA = 0.0025    # 0.25% price move on CEX
+LATENCY_ARB_POLY_MAX = 0.57   # Polymarket price must be < this (not yet reacted)
+LATENCY_ARB_POLY_MIN = 0.43   # Polymarket price must be > this
+
+# Adaptive latency windows (seconds): shortest first for fastest signal
+LATENCY_WINDOWS = [5.0, 10.0, 15.0, 30.0]
+# Confidence scaling per window: faster reaction = higher confidence
+LATENCY_CONF_BY_WINDOW = {5.0: 0.78, 10.0: 0.72, 15.0: 0.70, 30.0: 0.62}
 
 # Confidence levels
 CONF_CASCADE = 0.82
 CONF_OFI_STRONG = 0.67
 CONF_OFI_WEAK = 0.57
-CONF_LATENCY = 0.70
 CONF_NONE = 0.0
 
 
@@ -67,6 +77,16 @@ class Signal:
 
 
 @dataclass
+class FuturesOrderBookLevel:
+    """Snapshot of best bid/ask from futures book."""
+    timestamp: float
+    best_bid_price: float
+    best_bid_qty: float
+    best_ask_price: float
+    best_ask_qty: float
+
+
+@dataclass
 class AssetState:
     """Rolling state for one asset."""
 
@@ -75,7 +95,11 @@ class AssetState:
     # Price history (timestamp, price) — last 120 seconds
     prices: deque = field(default_factory=lambda: deque(maxlen=240))
 
-    # Order book snapshots (timestamp, bid_vol, ask_vol)
+    # Futures order book levels for true delta-OFI
+    # Each entry: FuturesOrderBookLevel
+    futures_book_snaps: deque = field(default_factory=lambda: deque(maxlen=120))
+
+    # Legacy spot orderbook snapshots (kept for fallback)
     orderbook_snaps: deque = field(default_factory=lambda: deque(maxlen=60))
 
     # Liquidations (timestamp, usd_size, side: "long"/"short")
@@ -83,8 +107,12 @@ class AssetState:
 
     # Last known price
     last_price: float = 0.0
-    price_15s_ago: float = 0.0
+    # Price history keyed by window: {window_seconds: price_at_that_time}
+    price_history_by_window: dict = field(default_factory=dict)
     price_updated_at: float = 0.0
+
+    # Rolling price buffer for adaptive windows (timestamp, price)
+    price_ring: deque = field(default_factory=lambda: deque(maxlen=500))
 
 
 class SignalEngine:
@@ -113,14 +141,14 @@ class SignalEngine:
 
         for asset in ASSETS:
             symbol = BINANCE_SYMBOLS[asset]
-            # Depth feed for OFI
+            # Futures depth feed for true delta-OFI (more reactive than spot)
             self._tasks.append(
                 asyncio.create_task(
-                    self._connect_depth(asset, symbol),
-                    name=f"depth_{asset}",
+                    self._connect_futures_depth(asset, symbol),
+                    name=f"futures_depth_{asset}",
                 )
             )
-            # Trade feed for price tracking
+            # Trade feed for price tracking (spot aggTrade, high frequency)
             self._tasks.append(
                 asyncio.create_task(
                     self._connect_trades(asset, symbol),
@@ -172,7 +200,6 @@ class SignalEngine:
         now = time.time()
 
         # === SIGNAL 1: Liquidation Cascade ===
-        # Sum liquidations in last 10 seconds
         liq_window = 10.0
         long_liq_usd = sum(
             size
@@ -186,12 +213,9 @@ class SignalEngine:
         )
 
         if long_liq_usd >= LIQUIDATION_CASCADE_USD:
-            # Long liquidations → price drops → buy DOWN
             log.info(
                 "[SIGNAL ENGINE] %s LIQUIDATION CASCADE (LONG) $%.0f → DOWN (conf=%.2f)",
-                asset,
-                long_liq_usd,
-                CONF_CASCADE,
+                asset, long_liq_usd, CONF_CASCADE,
             )
             return Signal(
                 asset=asset,
@@ -201,12 +225,9 @@ class SignalEngine:
             )
 
         if short_liq_usd >= LIQUIDATION_CASCADE_USD:
-            # Short liquidations → price rises → buy UP
             log.info(
                 "[SIGNAL ENGINE] %s LIQUIDATION CASCADE (SHORT) $%.0f → UP (conf=%.2f)",
-                asset,
-                short_liq_usd,
-                CONF_CASCADE,
+                asset, short_liq_usd, CONF_CASCADE,
             )
             return Signal(
                 asset=asset,
@@ -215,79 +236,38 @@ class SignalEngine:
                 reason=f"short_liquidation_cascade_${short_liq_usd / 1e6:.1f}M",
             )
 
-        # === SIGNAL 2: Order Flow Imbalance (OFI) ===
-        ofi = self._compute_ofi(state, window=30.0)
+        # === SIGNAL 2: True Delta-OFI (Futures book) ===
+        ofi, ofi_source = self._compute_delta_ofi(state, window=20.0)
 
         if ofi >= OFI_STRONG_THRESHOLD:
             log.info(
-                "[SIGNAL ENGINE] %s STRONG OFI=%.2f → UP (conf=%.2f)",
-                asset,
-                ofi,
-                CONF_OFI_STRONG,
+                "[SIGNAL ENGINE] %s STRONG OFI=%.3f [%s] → UP (conf=%.2f)",
+                asset, ofi, ofi_source, CONF_OFI_STRONG,
             )
             return Signal(
                 asset=asset,
                 direction="up",
                 confidence=CONF_OFI_STRONG,
-                reason=f"ofi_strong_{ofi:.2f}",
+                reason=f"ofi_strong_{ofi:.3f}_{ofi_source}",
             )
 
         if ofi <= -OFI_STRONG_THRESHOLD:
             log.info(
-                "[SIGNAL ENGINE] %s STRONG OFI=%.2f → DOWN (conf=%.2f)",
-                asset,
-                ofi,
-                CONF_OFI_STRONG,
+                "[SIGNAL ENGINE] %s STRONG OFI=%.3f [%s] → DOWN (conf=%.2f)",
+                asset, ofi, ofi_source, CONF_OFI_STRONG,
             )
             return Signal(
                 asset=asset,
                 direction="down",
                 confidence=CONF_OFI_STRONG,
-                reason=f"ofi_strong_{ofi:.2f}",
+                reason=f"ofi_strong_{ofi:.3f}_{ofi_source}",
             )
 
-        # === SIGNAL 3: Latency Arbitrage ===
-        # CEX price moved but Polymarket hasn't reacted yet
-        if state.last_price > 0 and state.price_15s_ago > 0:
-            price_delta = (state.last_price - state.price_15s_ago) / state.price_15s_ago
-
-            if (
-                price_delta >= LATENCY_ARB_DELTA
-                and polymarket_up_price < LATENCY_ARB_POLY_MAX
-            ):
-                # CEX rose, Polymarket UP still cheap → buy UP
-                log.info(
-                    "[SIGNAL ENGINE] %s LATENCY ARB: CEX +%.3f%% | PM_UP=$%.3f → UP (conf=%.2f)",
-                    asset,
-                    price_delta * 100,
-                    polymarket_up_price,
-                    CONF_LATENCY,
-                )
-                return Signal(
-                    asset=asset,
-                    direction="up",
-                    confidence=CONF_LATENCY,
-                    reason=f"latency_arb_cex+{price_delta * 100:.2f}%",
-                )
-
-            if (
-                price_delta <= -LATENCY_ARB_DELTA
-                and polymarket_up_price > LATENCY_ARB_POLY_MIN
-            ):
-                # CEX fell, Polymarket DOWN still cheap → buy DOWN
-                log.info(
-                    "[SIGNAL ENGINE] %s LATENCY ARB: CEX %.3f%% | PM_UP=$%.3f → DOWN (conf=%.2f)",
-                    asset,
-                    price_delta * 100,
-                    polymarket_up_price,
-                    CONF_LATENCY,
-                )
-                return Signal(
-                    asset=asset,
-                    direction="down",
-                    confidence=CONF_LATENCY,
-                    reason=f"latency_arb_cex{price_delta * 100:.2f}%",
-                )
+        # === SIGNAL 3: Adaptive Latency Arbitrage ===
+        # Try shortest window first (highest confidence), fall back to longer windows
+        latency_signal = self._compute_latency_arb(state, polymarket_up_price, now)
+        if latency_signal is not None:
+            return latency_signal
 
         # === WEAK OFI: only if polymarket price aligns ===
         if ofi >= OFI_WEAK_THRESHOLD and polymarket_up_price < 0.52:
@@ -295,17 +275,16 @@ class SignalEngine:
                 asset=asset,
                 direction="up",
                 confidence=CONF_OFI_WEAK,
-                reason=f"ofi_weak_{ofi:.2f}",
+                reason=f"ofi_weak_{ofi:.3f}_{ofi_source}",
             )
         if ofi <= -OFI_WEAK_THRESHOLD and polymarket_up_price > 0.48:
             return Signal(
                 asset=asset,
                 direction="down",
                 confidence=CONF_OFI_WEAK,
-                reason=f"ofi_weak_{ofi:.2f}",
+                reason=f"ofi_weak_{ofi:.3f}_{ofi_source}",
             )
 
-        # No signal
         return Signal(
             asset=asset,
             direction=None,
@@ -313,49 +292,144 @@ class SignalEngine:
             reason="no_edge",
         )
 
-    def _compute_ofi(self, state: AssetState, window: float = 30.0) -> float:
+    def _compute_delta_ofi(self, state: AssetState, window: float = 20.0) -> tuple[float, str]:
         """
-        Compute Order Flow Imbalance score for last N seconds.
+        Compute true Delta Order Flow Imbalance from futures book.
 
-        OFI = (bid_volume_increase - ask_volume_increase) / total_volume
-        Positive = buying pressure, Negative = selling pressure
+        True OFI = sum of signed changes at best bid/ask:
+          - bid_qty increases: +pressure (buyers aggressive)
+          - ask_qty decreases: +pressure (sellers pulled = buyers taking)
+          - bid_qty decreases: -pressure (buyers cancelled)
+          - ask_qty increases: -pressure (sellers added)
+
+        Normalised to [-1, +1].
+
+        Returns (ofi_score, source_label).
         """
         now = time.time()
+
+        # Prefer futures book snaps
         snaps = [
+            s for s in state.futures_book_snaps
+            if now - s.timestamp <= window
+        ]
+
+        if len(snaps) >= 3:
+            buy_pressure = 0.0
+            sell_pressure = 0.0
+
+            for i in range(1, len(snaps)):
+                prev = snaps[i - 1]
+                curr = snaps[i]
+
+                # Bid side: increase = buy pressure, decrease = selling into bids
+                bid_delta = curr.best_bid_qty - prev.best_bid_qty
+                # Ask side: decrease = demand absorbing asks, increase = supply added
+                ask_delta = prev.best_ask_qty - curr.best_ask_qty  # note: inverted
+
+                signed_flow = bid_delta + ask_delta
+                if signed_flow > 0:
+                    buy_pressure += signed_flow
+                else:
+                    sell_pressure += abs(signed_flow)
+
+            total = buy_pressure + sell_pressure
+            if total > 0:
+                ofi = (buy_pressure - sell_pressure) / total
+                return ofi, "futures_delta"
+
+        # Fallback: spot volume-based OFI (legacy)
+        spot_snaps = [
             (ts, bid, ask)
             for ts, bid, ask in state.orderbook_snaps
             if now - ts <= window
         ]
+        if len(spot_snaps) >= 3:
+            bid_increases = 0.0
+            ask_increases = 0.0
+            total = 0.0
+            for i in range(1, len(spot_snaps)):
+                _, prev_bid, prev_ask = spot_snaps[i - 1]
+                _, curr_bid, curr_ask = spot_snaps[i]
+                bid_delta = max(0, curr_bid - prev_bid)
+                ask_delta = max(0, curr_ask - prev_ask)
+                bid_increases += bid_delta
+                ask_increases += ask_delta
+                total += bid_delta + ask_delta
+            if total > 0:
+                # Scale to [-1, 1] range (previously was *10)
+                raw = (bid_increases - ask_increases) / total
+                return raw, "spot_volume"
 
-        if len(snaps) < 3:
-            return 0.0
+        return 0.0, "no_data"
 
-        bid_increases = 0.0
-        ask_increases = 0.0
-        total = 0.0
+    def _compute_latency_arb(
+        self,
+        state: AssetState,
+        polymarket_up_price: float,
+        now: float,
+    ) -> Signal | None:
+        """
+        Adaptive latency arbitrage: try multiple lookback windows.
 
-        for i in range(1, len(snaps)):
-            _, prev_bid, prev_ask = snaps[i - 1]
-            _, curr_bid, curr_ask = snaps[i]
+        Shorter windows = higher confidence (PM reacts slowly).
+        Returns the first (most confident) signal found, or None.
+        """
+        if state.last_price <= 0 or len(state.price_ring) < 10:
+            return None
 
-            bid_delta = max(0, curr_bid - prev_bid)
-            ask_delta = max(0, curr_ask - prev_ask)
+        asset = state.symbol.replace("usdt", "").upper()
 
-            bid_increases += bid_delta
-            ask_increases += ask_delta
-            total += bid_delta + ask_delta
+        for window in LATENCY_WINDOWS:
+            cutoff = now - window
+            old_prices = [(ts, p) for ts, p in state.price_ring if ts <= cutoff]
+            if not old_prices:
+                continue
 
-        if total == 0:
-            return 0.0
+            ref_price = old_prices[-1][1]
+            price_delta = (state.last_price - ref_price) / ref_price
 
-        return (bid_increases - ask_increases) / total * 10  # scale to readable number
+            conf = LATENCY_CONF_BY_WINDOW[window]
+
+            if (
+                price_delta >= LATENCY_ARB_DELTA
+                and polymarket_up_price < LATENCY_ARB_POLY_MAX
+            ):
+                log.info(
+                    "[SIGNAL ENGINE] %s LATENCY ARB (%ds): CEX +%.3f%% | PM_UP=$%.3f → UP (conf=%.2f)",
+                    asset, int(window), price_delta * 100, polymarket_up_price, conf,
+                )
+                return Signal(
+                    asset=asset,
+                    direction="up",
+                    confidence=conf,
+                    reason=f"latency_arb_{int(window)}s_cex+{price_delta * 100:.2f}%",
+                )
+
+            if (
+                price_delta <= -LATENCY_ARB_DELTA
+                and polymarket_up_price > LATENCY_ARB_POLY_MIN
+            ):
+                log.info(
+                    "[SIGNAL ENGINE] %s LATENCY ARB (%ds): CEX %.3f%% | PM_UP=$%.3f → DOWN (conf=%.2f)",
+                    asset, int(window), price_delta * 100, polymarket_up_price, conf,
+                )
+                return Signal(
+                    asset=asset,
+                    direction="down",
+                    confidence=conf,
+                    reason=f"latency_arb_{int(window)}s_cex{price_delta * 100:.2f}%",
+                )
+
+        return None
 
     # ── WebSocket connections ────────────────────────────────────────────────
 
-    async def _connect_depth(self, asset: str, symbol: str) -> None:
-        """Connect to Binance depth WebSocket for OFI calculation."""
-        url = f"wss://stream.binance.com:9443/ws/{symbol}@depth@500ms"
-        await self._ws_loop(asset, url, self._handle_depth, feed_name="depth")
+    async def _connect_futures_depth(self, asset: str, symbol: str) -> None:
+        """Connect to Binance FUTURES depth WebSocket for true delta-OFI."""
+        # Futures book is thinner and more reactive than spot — better OFI signal
+        url = f"wss://fstream.binance.com/ws/{symbol}@bookTicker"
+        await self._ws_loop(asset, url, self._handle_futures_depth, feed_name="futures_depth")
 
     async def _connect_trades(self, asset: str, symbol: str) -> None:
         """Connect to Binance trade WebSocket for price tracking."""
@@ -378,7 +452,7 @@ class SignalEngine:
         reconnect_delay: float = 5.0,
     ) -> None:
         """WebSocket connection loop with auto-reconnect."""
-        first_tick_skipped = False  # Layer 4: skip first (stale) tick
+        first_tick_skipped = False
 
         while self._running:
             try:
@@ -397,7 +471,7 @@ class SignalEngine:
                             if msg.type == aiohttp.WSMsgType.TEXT:
                                 data = json.loads(msg.data)
 
-                                # Layer 4: skip first tick (stale cache)
+                                # Skip first tick (stale cache)
                                 if not first_tick_skipped:
                                     first_tick_skipped = True
                                     continue
@@ -415,27 +489,34 @@ class SignalEngine:
             except Exception as exc:
                 log.debug(
                     "[SIGNAL ENGINE] %s %s disconnected: %s — reconnecting in %.0fs",
-                    asset,
-                    feed_name,
-                    exc,
-                    reconnect_delay,
+                    asset, feed_name, exc, reconnect_delay,
                 )
 
             if self._running:
                 await asyncio.sleep(reconnect_delay)
 
-    def _handle_depth(self, asset: str, data: dict) -> None:
-        """Process order book depth update."""
+    def _handle_futures_depth(self, asset: str, data: dict) -> None:
+        """Process futures bookTicker update for true delta-OFI."""
         state = self.states[asset]
         try:
-            bids = data.get("b", [])
-            asks = data.get("a", [])
+            # bookTicker format: {"b": "best_bid_price", "B": "best_bid_qty",
+            #                      "a": "best_ask_price", "A": "best_ask_qty"}
+            best_bid_price = float(data.get("b", 0))
+            best_bid_qty = float(data.get("B", 0))
+            best_ask_price = float(data.get("a", 0))
+            best_ask_qty = float(data.get("A", 0))
 
-            # Sum top 10 levels
-            bid_vol = sum(float(qty) for _, qty in bids[:10])
-            ask_vol = sum(float(qty) for _, qty in asks[:10])
+            if best_bid_price <= 0 or best_ask_price <= 0:
+                return
 
-            state.orderbook_snaps.append((time.time(), bid_vol, ask_vol))
+            snap = FuturesOrderBookLevel(
+                timestamp=time.time(),
+                best_bid_price=best_bid_price,
+                best_bid_qty=best_bid_qty,
+                best_ask_price=best_ask_price,
+                best_ask_qty=best_ask_qty,
+            )
+            state.futures_book_snaps.append(snap)
         except Exception:
             pass
 
@@ -449,18 +530,22 @@ class SignalEngine:
 
             now = time.time()
             state.prices.append((now, price))
-
-            # Update 15s ago price
-            cutoff = now - 15.0
-            old = [(ts, p) for ts, p in state.prices if ts <= cutoff]
-            if old:
-                state.price_15s_ago = old[-1][1]
-            elif state.price_15s_ago == 0:
-                state.price_15s_ago = price
-
+            state.price_ring.append((now, price))
             state.last_price = price
             state.price_updated_at = now
 
+        except Exception:
+            pass
+
+    def _handle_depth(self, asset: str, data: dict) -> None:
+        """Process spot order book depth update (legacy fallback for OFI)."""
+        state = self.states[asset]
+        try:
+            bids = data.get("b", [])
+            asks = data.get("a", [])
+            bid_vol = sum(float(qty) for _, qty in bids[:10])
+            ask_vol = sum(float(qty) for _, qty in asks[:10])
+            state.orderbook_snaps.append((time.time(), bid_vol, ask_vol))
         except Exception:
             pass
 
@@ -474,7 +559,7 @@ class SignalEngine:
             price = float(order.get("p", 0))
             usd_size = qty * price
 
-            if usd_size < 10_000:  # ignore tiny liquidations
+            if usd_size < 10_000:
                 return
 
             liq_side = "long" if side == "SELL" else "short"
@@ -483,9 +568,7 @@ class SignalEngine:
             if usd_size > 500_000:
                 log.info(
                     "[SIGNAL ENGINE] %s LIQUIDATION $%.0fK %s",
-                    asset,
-                    usd_size / 1000,
-                    liq_side.upper(),
+                    asset, usd_size / 1000, liq_side.upper(),
                 )
         except Exception:
             pass
@@ -501,3 +584,4 @@ def get_signal_engine() -> SignalEngine:
     if _engine is None:
         _engine = SignalEngine()
     return _engine
+

@@ -624,6 +624,21 @@ def execute_trade(
     if not private_key:
         raise ValueError("private_key is required for onchain trading")
 
+    # ── REDEEM_ONLY guard ────────────────────────────────────────────
+    try:
+        from polybot.config import get_settings as _get_cfg
+
+        if _get_cfg().redeem_only:
+            log.info(
+                "[REDEEM_ONLY] Trade blocked – only redemptions allowed "
+                "(token=%s, amount=%s)",
+                token_id,
+                amount_usdc,
+            )
+            return {"status": "skipped", "reason": "redeem_only"}
+    except Exception:
+        pass  # config not available → continue normally
+
     private_key = _normalize_private_key(private_key)
 
     w3 = _get_web3()
@@ -1465,6 +1480,21 @@ class OnchainExecutor:
         if not self.private_key:
             raise ValueError("POLYMARKET_PRIVATE_KEY is not set")
 
+        # ── REDEEM_ONLY guard ────────────────────────────────────────
+        try:
+            from polybot.config import get_settings as _get_cfg
+
+            if _get_cfg().redeem_only:
+                log.info(
+                    "[REDEEM_ONLY] Trade blocked – only redemptions allowed "
+                    "(token=%s, amount=%s)",
+                    token_id,
+                    amount_usdc,
+                )
+                return {"status": "skipped", "reason": "redeem_only"}
+        except Exception:
+            pass  # config not available → continue normally
+
         side_upper = side.upper()
         side_label = "BUY" if side_upper in ("UP", "BUY", "YES") else "SELL"
 
@@ -1790,6 +1820,169 @@ class OnchainExecutor:
         finally:
             # V89: Always release the lock
             _active_redeems.discard(redeem_key)
+
+    async def scan_and_redeem_all_positions(self) -> dict:
+        """Scan wallet for ALL redeemable positions and redeem them.
+
+        Queries the Polymarket Data API for every position the wallet holds,
+        filters for redeemable ones, and redeems each via the CTF contract.
+        This works independently of the internal ``open_positions`` dict,
+        so it catches positions the bot lost track of after a restart.
+
+        Returns:
+            Summary dict with ``successful``, ``failed``, ``total_found``,
+            ``usdc_before``, ``usdc_after``, and ``usdc_gained`` keys.
+        """
+        import aiohttp
+
+        if not self.wallet:
+            log.warning("[STARTUP REDEEM] No wallet configured — skipping")
+            return {"successful": 0, "failed": 0, "total_found": 0}
+
+        log.info(
+            "[STARTUP REDEEM] Scanning ALL wallet positions for %s …",
+            self.wallet,
+        )
+
+        # ── 1. Get USDC balance before ──────────────────────────────────────
+        usdc_before = self.get_usdc_balance()
+        log.info("[STARTUP REDEEM] USDC balance before: $%.4f", usdc_before)
+
+        # ── 2. Fetch redeemable positions from Polymarket Data API ──────────
+        positions: list[dict] = []
+        try:
+            async with aiohttp.ClientSession() as session:
+                timeout = aiohttp.ClientTimeout(total=15)
+                async with session.get(
+                    "https://data-api.polymarket.com/positions",
+                    params={
+                        "user": self.wallet,
+                        "sizeThreshold": "0.001",
+                        "limit": 500,
+                    },
+                    timeout=timeout,
+                ) as resp:
+                    if resp.status == 200:
+                        all_positions = await resp.json()
+                        positions = [
+                            p for p in all_positions if p.get("redeemable") is True
+                        ]
+                        log.info(
+                            "[STARTUP REDEEM] Data API: %d total positions, %d redeemable",
+                            len(all_positions),
+                            len(positions),
+                        )
+                    else:
+                        log.warning(
+                            "[STARTUP REDEEM] Data API returned status %d",
+                            resp.status,
+                        )
+        except Exception as exc:
+            log.error(
+                "[STARTUP REDEEM] Data API error: %s — %s", type(exc).__name__, exc
+            )
+
+        if not positions:
+            log.info("[STARTUP REDEEM] No redeemable positions found — nothing to do")
+            return {
+                "successful": 0,
+                "failed": 0,
+                "total_found": 0,
+                "usdc_before": usdc_before,
+                "usdc_after": usdc_before,
+                "usdc_gained": 0.0,
+            }
+
+        log.info(
+            "[STARTUP REDEEM] Found %d redeemable position(s) — redeeming …",
+            len(positions),
+        )
+
+        # ── 3. Redeem each position ─────────────────────────────────────────
+        successful = 0
+        failed = 0
+
+        for i, pos in enumerate(positions, start=1):
+            condition_id = pos.get("conditionId") or pos.get("condition_id", "")
+            outcome_index = int(pos.get("outcomeIndex", 0))
+            title = (pos.get("title") or "Unknown")[:60]
+
+            if not condition_id:
+                log.warning(
+                    "[STARTUP REDEEM] Position %d/%d: no conditionId — skipping",
+                    i,
+                    len(positions),
+                )
+                failed += 1
+                continue
+
+            # Map outcomeIndex to up/down for redeem_winning_positions
+            winning_outcome = "up" if outcome_index == 0 else "down"
+
+            log.info(
+                "[STARTUP REDEEM] Redeeming %d/%d: '%s' | condition=%s | outcome=%s",
+                i,
+                len(positions),
+                title,
+                condition_id[:20] + "…",
+                winning_outcome,
+            )
+
+            try:
+                await self.redeem_winning_positions(condition_id, winning_outcome)
+                successful += 1
+                log.info(
+                    "[STARTUP REDEEM] ✅ %d/%d redeemed: '%s'",
+                    i,
+                    len(positions),
+                    title,
+                )
+            except Exception as exc:
+                exc_str = str(exc).lower()
+                if "already known" in exc_str or "nonce too low" in exc_str:
+                    log.info(
+                        "[STARTUP REDEEM] TX already submitted for '%s' — OK",
+                        title,
+                    )
+                    successful += 1
+                else:
+                    log.error(
+                        "[STARTUP REDEEM] ❌ Failed to redeem '%s': %s",
+                        title,
+                        exc,
+                    )
+                    failed += 1
+
+            # Brief pause between TXs to avoid nonce collisions
+            if i < len(positions):
+                await asyncio.sleep(2)
+
+        # ── 4. Final balance ────────────────────────────────────────────────
+        usdc_after = self.get_usdc_balance()
+        usdc_gained = usdc_after - usdc_before
+
+        log.info(
+            "[STARTUP REDEEM] ========== RESULT ==========\n"
+            "  Successful: %d\n"
+            "  Failed: %d\n"
+            "  USDC before: $%.4f\n"
+            "  USDC after:  $%.4f\n"
+            "  Gained:     +$%.4f",
+            successful,
+            failed,
+            usdc_before,
+            usdc_after,
+            usdc_gained,
+        )
+
+        return {
+            "successful": successful,
+            "failed": failed,
+            "total_found": len(positions),
+            "usdc_before": usdc_before,
+            "usdc_after": usdc_after,
+            "usdc_gained": usdc_gained,
+        }
 
     def get_usdc_balance(self) -> float:
         """Return USDC balance for the configured wallet."""

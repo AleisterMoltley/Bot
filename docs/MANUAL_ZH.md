@@ -11,9 +11,6 @@
 [![العربية](https://img.shields.io/badge/🇸🇦_العربية-الدليل-green?style=flat-square)](MANUAL_AR.md)
 [![中文](https://img.shields.io/badge/🇨🇳_中文-手册-red?style=flat-square)](MANUAL_ZH.md)
 [![日本語](https://img.shields.io/badge/🇯🇵_日本語-マニュアル-white?style=flat-square)](MANUAL_JA.md)
-[![tlhIngan](https://img.shields.io/badge/🖖_tlhIngan-ghItlh-red?style=flat-square)](MANUAL_KLINGON.md)
-[![Sindarin](https://img.shields.io/badge/🧝_Sindarin-Teitho-green?style=flat-square)](MANUAL_SINDARIN.md)
-[![Valyrian](https://img.shields.io/badge/🐉_Valyrian-Udrir-purple?style=flat-square)](MANUAL_VALYRIAN.md)
 
 ---
 

@@ -93,28 +93,58 @@ class RiskManager:
     def check_can_trade(self) -> tuple[bool, str]:
         """Check if trading is allowed under current risk limits.
 
-        ⚠️ FORCED EXECUTION v5: This function ALWAYS returns True.
-        All risk guards have been removed for forced execution.
-
         Returns:
-            (True, "FORCED_EXECUTION") - Always allows trading
+            (can_trade: bool, reason: str)
         """
-        # FORCED EXECUTION v5: Force allow all trades, no guards
-        return True, "FORCED_EXECUTION"
+        self._ensure_daily_reset()
+        settings = get_settings()
+
+        # Circuit breaker active?
+        if self._state.is_paused:
+            # Auto-unpause after cooldown (15 min for loss streak, 60 min for drawdown)
+            cooldown = 900.0 if self._state.pause_reason == "consecutive_losses" else 3600.0
+            elapsed = time.time() - self._state.pause_time
+            if elapsed >= cooldown:
+                log.info(
+                    "Circuit breaker auto-reset after cooldown",
+                    reason=self._state.pause_reason,
+                    elapsed_min=f"{elapsed / 60:.1f}",
+                )
+                self._state.is_paused = False
+                self._state.pause_reason = ""
+                self._state.consecutive_losses = 0
+            else:
+                remaining = (cooldown - elapsed) / 60
+                return False, f"circuit_breaker:{self._state.pause_reason} ({remaining:.0f}min remaining)"
+
+        # Daily loss limit
+        if self._state.daily_loss >= settings.max_daily_loss:
+            self._trigger_circuit_breaker("daily_loss_limit")
+            return False, f"daily_loss_limit:${self._state.daily_loss:.2f}>=${settings.max_daily_loss:.2f}"
+
+        # Daily trade limit
+        if self._state.daily_trades >= settings.max_daily_trades:
+            return False, f"daily_trade_limit:{self._state.daily_trades}>={settings.max_daily_trades}"
+
+        # Consecutive losses
+        if self._state.consecutive_losses >= settings.circuit_breaker_consecutive_losses:
+            self._trigger_circuit_breaker("consecutive_losses")
+            return False, f"consecutive_losses:{self._state.consecutive_losses}>={settings.circuit_breaker_consecutive_losses}"
+
+        return True, "OK"
 
     def check_liquidity(self, liquidity_usd: float) -> tuple[bool, str]:
         """Check if market has sufficient liquidity.
-
-        ⚠️ FORCED EXECUTION v5: This function ALWAYS returns True.
-        Liquidity check disabled for forced execution.
 
         Args:
             liquidity_usd: Market liquidity in USD
 
         Returns:
-            (True, "OK") - Always passes liquidity check
+            (passes: bool, reason: str)
         """
-        # FORCED EXECUTION v5: Force allow all liquidity levels
+        settings = get_settings()
+        if liquidity_usd < settings.min_liquidity_usd:
+            return False, f"low_liquidity:${liquidity_usd:.0f}<${settings.min_liquidity_usd:.0f}"
         return True, "OK"
 
     def record_trade(self, profit: float) -> RiskState:
@@ -195,17 +225,16 @@ class RiskManager:
     def check_trade_size(self, trade_size_usd: float) -> tuple[bool, str]:
         """Check if trade size is acceptable.
 
-        ⚠️ FORCED EXECUTION v5: This function ALWAYS returns True.
-        All trade size guards have been removed for forced execution.
-
         Args:
             trade_size_usd: Proposed trade size in USD
 
         Returns:
-            (True, "FORCED_OK") - Always allows trade
+            (passes: bool, reason: str)
         """
-        # FORCED EXECUTION v5: Force allow all trade sizes, no guards
-        return True, "FORCED_OK"
+        settings = get_settings()
+        if trade_size_usd < settings.min_trade_size_usd_env:
+            return False, f"trade_too_small:${trade_size_usd:.2f}<${settings.min_trade_size_usd_env:.2f}"
+        return True, "OK"
 
     def _trigger_circuit_breaker(self, reason: str) -> None:
         """Trigger the circuit breaker."""

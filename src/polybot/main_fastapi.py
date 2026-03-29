@@ -354,6 +354,31 @@ async def lifespan(app: FastAPI):
             f"[V78 STARTUP] Cut-loss + auto-redeem monitor startup failed: {e}"
         )
 
+    # V90: Startup redeem — scan wallet for ALL redeemable positions and redeem
+    # them immediately. Catches positions the bot lost track of after restart.
+    if settings.startup_redeem_all:
+        try:
+            _executor = (
+                app.state.onchain_executor
+                if hasattr(app.state, "onchain_executor")
+                else None
+            )
+            if _executor is not None:
+                logger.info(
+                    "[V90 STARTUP] Scanning wallet for ALL redeemable positions …"
+                )
+                asyncio.create_task(_executor.scan_and_redeem_all_positions())
+            else:
+                logger.warning(
+                    "[V90 STARTUP] OnchainExecutor not available — skipping startup redeem"
+                )
+        except Exception as e:
+            logger.warning(f"[V90 STARTUP] Startup redeem failed: {e}")
+    else:
+        logger.info(
+            "[V90 STARTUP] Startup redeem disabled — set STARTUP_REDEEM_ALL=true to enable"
+        )
+
     # V89: Start full redeemer task if enabled
     # This runs independently of the internal open_positions state and finds
     # ALL redeemable positions on-chain + via Data API
@@ -435,9 +460,18 @@ async def lifespan(app: FastAPI):
                 logger.warning(f"Scanner cycle error: {e}")
             await asyncio.sleep(settings.scan_interval_seconds)
 
-    asyncio.create_task(continuous_scanner())
+    # ── REDEEM_ONLY mode: skip scanner entirely, only redeem ──────────────
+    if settings.redeem_only:
+        logger.info(
+            "🛑 REDEEM_ONLY=true – Scanner deaktiviert, keine neuen Trades. "
+            "Nur bereits aktive Positionen werden redeemed."
+        )
+    else:
+        asyncio.create_task(continuous_scanner())
 
     # PATCH 2026: Enhanced startup logging with production settings
+    if settings.redeem_only:
+        logger.info("🛑 REDEEM_ONLY: true – Wind-Down-Modus aktiv")
     logger.info(f"📊 Mode: {settings.mode.upper()}")
     logger.info(f"🔄 DRY_RUN: {settings.dry_run}")
     logger.info(f"🤖 AUTO_EXECUTE: {settings.auto_execute}")
@@ -1033,8 +1067,17 @@ async def production_status():
         settings, "auto_execute", False
     )
 
+    redeem_only = getattr(settings, "redeem_only", False)
+
     return {
-        "overall_status": "PRODUCTION_READY" if hyperopt_completed else "SETUP_NEEDED",
+        "overall_status": (
+            "REDEEM_ONLY"
+            if redeem_only
+            else "PRODUCTION_READY"
+            if hyperopt_completed
+            else "SETUP_NEEDED"
+        ),
+        "redeem_only": "🛑 active – no new trades" if redeem_only else "❌ off",
         "5min_filter": "✅ active",
         "edge_engine_v2": "✅ volatility-adjusted",
         "auto_trade": "✅ enabled" if auto_trade_enabled else "❌ dry_run",
