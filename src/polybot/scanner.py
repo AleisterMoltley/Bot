@@ -1751,9 +1751,20 @@ async def execute_auto_trades_async(
     """
     from polybot.config import get_settings
     from polybot.risk import calculate_kelly_position
+    from polybot.risk_manager import get_risk_manager
 
     settings = get_settings()
     results: list[dict] = []
+    risk_mgr = get_risk_manager()
+
+    # ── Risk Manager gate: stop if circuit breaker active ──
+    can_trade, risk_reason = risk_mgr.check_can_trade()
+    if not can_trade:
+        logger.warning(
+            "Auto-trade BLOCKED by risk manager",
+            reason=risk_reason,
+        )
+        return results
 
     # ===================================================================
     # V9 FINAL: STARTUP VALIDATION
@@ -1813,6 +1824,18 @@ async def execute_auto_trades_async(
                     liquidity,
                 )
                 continue
+
+            # ── Risk Manager: liquidity check ──
+            liq_ok, liq_reason = risk_mgr.check_liquidity(liquidity)
+            if not liq_ok:
+                log_rejection(raw_market, liq_reason, edge, ev, liquidity)
+                continue
+
+            # ── Risk Manager: re-check can_trade (may have been paused by previous trade) ──
+            can_trade, risk_reason = risk_mgr.check_can_trade()
+            if not can_trade:
+                logger.warning("Auto-trade stopped mid-cycle", reason=risk_reason)
+                break
 
             # Calculate Kelly position size
             kelly_size = calculate_kelly_position(

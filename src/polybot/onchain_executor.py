@@ -26,6 +26,7 @@ from eth_account.messages import encode_typed_data
 from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import ApiCreds, MarketOrderArgs, OrderArgs
 from web3 import Web3
+from web3.exceptions import ContractLogicError, TimeExhausted, TransactionNotFound
 from web3.middleware import ExtraDataToPOAMiddleware
 
 from polybot.logging_setup import get_logger
@@ -228,6 +229,33 @@ def mask_rpc_url(url: str) -> str:
     if m:
         return m.group(1) + m.group(2)[:6] + "..."
     return url
+
+
+def _build_eip1559_gas(w3: Web3, gas_limit: int = 100_000) -> dict:
+    """Build EIP-1559 gas parameters with dynamic estimation.
+
+    Returns dict with gas, maxFeePerGas, maxPriorityFeePerGas.
+    Falls back to safe defaults if estimation fails.
+    """
+    try:
+        base_fee = w3.eth.gas_price
+        max_fee = base_fee * 2
+        priority_fee = w3.to_wei("30", "gwei")
+        # Ensure max_fee is at least priority_fee + base
+        if max_fee < base_fee + priority_fee:
+            max_fee = base_fee + priority_fee
+        return {
+            "gas": gas_limit,
+            "maxFeePerGas": max_fee,
+            "maxPriorityFeePerGas": priority_fee,
+        }
+    except Exception:
+        # Safe fallback
+        return {
+            "gas": gas_limit,
+            "maxFeePerGas": w3.to_wei("100", "gwei"),
+            "maxPriorityFeePerGas": w3.to_wei("30", "gwei"),
+        }
 
 
 def _get_web3() -> Web3:
@@ -574,6 +602,10 @@ def _submit_via_clob_client(
 
     try:
         result = clob_client.create_and_post_order(order_args)
+    except requests.RequestException as exc:
+        raise RuntimeError(f"CLOB order network error: {exc}") from exc
+    except (ValueError, TypeError, KeyError) as exc:
+        raise RuntimeError(f"CLOB order data error: {exc}") from exc
     except Exception as exc:
         raise RuntimeError(f"CLOB order submission failed: {exc}") from exc
 
@@ -636,7 +668,7 @@ def execute_trade(
                 amount_usdc,
             )
             return {"status": "skipped", "reason": "redeem_only"}
-    except Exception:
+    except (AttributeError, ImportError):
         pass  # config not available → continue normally
 
     private_key = _normalize_private_key(private_key)
@@ -665,7 +697,7 @@ def execute_trade(
             )
             if 0.01 <= book_price <= 0.99:
                 current_price = book_price
-    except Exception as exc:
+    except (requests.RequestException, KeyError, ValueError) as exc:
         log.warning("Failed to fetch orderbook – using provided price: %s", exc)
 
     # Price fallback: if unknown or non-positive, default to 0.5
@@ -748,7 +780,17 @@ def execute_trade(
         tx_hash_hex = tx_hashes[0]
         # Wait for on-chain confirmation
         tx_hash_bytes = bytes.fromhex(tx_hash_hex.replace("0x", ""))
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash_bytes, timeout=60)
+        try:
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash_bytes, timeout=60)
+        except TimeExhausted:
+            log.warning(
+                "Transaction timeout — check manually on explorer",
+                tx_hash=tx_hash_hex,
+            )
+            raise RuntimeError(f"Transaction timeout: {tx_hash_hex}")
+        except TransactionNotFound:
+            log.error("Transaction not found after send", tx_hash=tx_hash_hex)
+            raise RuntimeError(f"Transaction not found: {tx_hash_hex}")
 
         if receipt.status != 1:
             raise RuntimeError(f"Transaction reverted: {tx_hash_hex}")
@@ -840,7 +882,7 @@ def _register_position_in_shared_executor(
             token_id,
             condition_id or "unknown",
         )
-    except Exception as exc:
+    except (AttributeError, KeyError, TypeError) as exc:
         log.warning("[V88] Failed to register position in shared executor: %s", exc)
 
 
@@ -1742,9 +1784,8 @@ class OnchainExecutor:
                 {
                     "from": self.wallet,
                     # V89: Increased from 250k to 300k for [1,2] dual-outcome redemption.
-                    # Conservative buffer since we now redeem both outcomes in one call.
                     "gas": 300_000,
-                    "gasPrice": self.w3.to_wei("35", "gwei"),
+                    **{k: v for k, v in _build_eip1559_gas(self.w3, 300_000).items() if k != "gas"},
                     "nonce": self.w3.eth.get_transaction_count(self.wallet),
                 }
             )
@@ -1788,6 +1829,14 @@ class OnchainExecutor:
                 condition_id,
                 tx_hash.hex(),
             )
+
+            # Track position closed in risk manager
+            try:
+                from polybot.risk_manager import get_risk_manager
+                get_risk_manager().record_position_closed()
+            except Exception:
+                pass  # non-critical
+
             return dict(receipt)
 
         except Exception as err:
@@ -1805,6 +1854,11 @@ class OnchainExecutor:
                         condition_id,
                         getattr(replacement_hash, "hash", "unknown"),
                     )
+                    try:
+                        from polybot.risk_manager import get_risk_manager
+                        get_risk_manager().record_position_closed()
+                    except Exception:
+                        pass
                     return {}
 
             # Re-raise configuration errors that should propagate

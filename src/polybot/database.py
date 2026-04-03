@@ -196,27 +196,60 @@ CREATE TABLE IF NOT EXISTS bot_config (
     value TEXT NOT NULL,
     updated_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS piggybank_transfers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    profit_usd REAL NOT NULL,
+    amount_usd REAL NOT NULL,
+    tx_hash TEXT,
+    status TEXT DEFAULT 'ok'
+);
 """
+
+
+# ── Persistent connection singleton (avoids open/close overhead) ──
+_PERSISTENT_CONN: sqlite3.Connection | None = None
+
+
+def _get_persistent_conn() -> sqlite3.Connection:
+    """Get or create a persistent SQLite connection with WAL mode."""
+    global _PERSISTENT_CONN
+    if _PERSISTENT_CONN is None:
+        db_path = _get_db_path()
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        _PERSISTENT_CONN = sqlite3.connect(
+            str(db_path), check_same_thread=False
+        )
+        _PERSISTENT_CONN.row_factory = sqlite3.Row
+        _PERSISTENT_CONN.execute("PRAGMA journal_mode=WAL")
+        _PERSISTENT_CONN.execute("PRAGMA busy_timeout=5000")
+        _PERSISTENT_CONN.execute("PRAGMA synchronous=NORMAL")
+        _PERSISTENT_CONN.execute("PRAGMA cache_size=-65536")  # 64MB
+        _PERSISTENT_CONN.execute("PRAGMA temp_store=MEMORY")
+    return _PERSISTENT_CONN
 
 
 def init_db() -> None:
     """Initialize database with schema."""
-    db_path = _get_db_path()
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.executescript(SCHEMA)
+    conn = _get_persistent_conn()
+    conn.executescript(SCHEMA)
+    _ensure_indexes()
 
 
 @contextmanager
 def get_db():
-    """Get a database connection context manager."""
-    conn = sqlite3.connect(str(_get_db_path()))
-    conn.row_factory = sqlite3.Row
+    """Get a database connection context manager.
+
+    Uses persistent connection with WAL mode for concurrent access.
+    """
+    conn = _get_persistent_conn()
     try:
         yield conn
         conn.commit()
-    finally:
-        conn.close()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def record_trade(
@@ -669,3 +702,12 @@ def get_position_pnl_summary() -> dict[str, Any]:
             "open_positions": dict(open_row) if open_row else {},
             "closed_positions": dict(closed_row) if closed_row else {},
         }
+
+
+def _ensure_indexes() -> None:
+    """Create performance indexes (idempotent)."""
+    conn = _get_persistent_conn()
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_piggybank_ts ON piggybank_transfers(timestamp)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_trades_ts ON trades(timestamp)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status)")
+    conn.commit()

@@ -11,10 +11,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import hashlib
+import hmac
+import secrets
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 from web3.exceptions import ABIFunctionNotFound, ContractLogicError
 
 from polybot import __version__
@@ -306,6 +311,21 @@ async def lifespan(app: FastAPI):
         f"🚀 PolyBot v{__version__} | Alchemy={alchemy_enabled} | RPC={rpc_url_preview}"
     )
 
+    # ── Production safety warnings ──
+    if not settings.dry_run:
+        logger.warning(
+            "⚠️  LIVE TRADING ACTIVE (DRY_RUN=false) — real money at risk!"
+        )
+        if not settings.dashboard_password.get_secret_value():
+            logger.critical(
+                "🚨 LIVE TRADING without DASHBOARD_PASSWORD! "
+                "API is completely open. Set DASHBOARD_PASSWORD in Railway ENV."
+            )
+    elif not settings.dashboard_password.get_secret_value():
+        logger.warning(
+            "⚠️  DASHBOARD_PASSWORD not set — API/dashboard is unauthenticated!"
+        )
+
     if alchemy_key:
         logger.info(
             "✅ Alchemy Key erkannt – using https://polygon-mainnet.g.alchemy.com/v2/..."
@@ -406,6 +426,11 @@ async def lifespan(app: FastAPI):
 
     # PATCH 2026: Production-ready continuous scanner with real trade execution
     async def continuous_scanner():
+        # REDEEM_ONLY: skip scanner entirely — only redemptions allowed
+        if getattr(settings, "redeem_only", False):
+            logger.info("🛑 REDEEM_ONLY active — scanner disabled, only redeeming positions")
+            return
+
         # PATCH 2026: Direct attribute access since min_ev is now a proper Field
         min_ev_threshold = settings.min_ev
         scanner = MaxProfitScanner(
@@ -576,11 +601,126 @@ async def _init_rpc_and_wallet_check(
 
 app = FastAPI(title="PolyBot", lifespan=lifespan)
 
+
+# ── Security Headers Middleware ──
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add standard security headers to all responses."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        # HSTS only if behind TLS (Railway always is)
+        if os.environ.get("RAILWAY_ENVIRONMENT"):
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
+
+
+# ── Auth Middleware: protects /api/ routes with dashboard_password ──
+# Public: /api/health (for Railway health checks)
+# Protected: everything else under /api/ and /dashboard
+_AUTH_PUBLIC_PATHS = {"/api/health"}
+
+# Rate limiting for failed auth attempts (brute-force protection)
+_AUTH_FAIL_TRACKER: dict[str, list[float]] = {}  # IP → list of failure timestamps
+_AUTH_FAIL_WINDOW = 300  # 5 minutes
+_AUTH_FAIL_MAX = 10  # max failures per window
+
+
+def _is_rate_limited(client_ip: str) -> bool:
+    """Check if an IP has exceeded auth failure rate limit."""
+    now = time.time()
+    failures = _AUTH_FAIL_TRACKER.get(client_ip, [])
+    # Prune old entries
+    failures = [t for t in failures if now - t < _AUTH_FAIL_WINDOW]
+    _AUTH_FAIL_TRACKER[client_ip] = failures
+    return len(failures) >= _AUTH_FAIL_MAX
+
+
+def _record_auth_failure(client_ip: str) -> None:
+    """Record a failed auth attempt for rate limiting."""
+    _AUTH_FAIL_TRACKER.setdefault(client_ip, []).append(time.time())
+
+
+class DashboardAuthMiddleware(BaseHTTPMiddleware):
+    """Simple bearer-token auth for dashboard and API routes.
+
+    If DASHBOARD_PASSWORD is set, all /api/ and /dashboard routes
+    (except /api/health) require either:
+      - Header: Authorization: Bearer <password>
+      - Query param: ?token=<password>
+
+    If DASHBOARD_PASSWORD is empty/unset, auth is disabled (open access).
+    Includes brute-force rate limiting (10 failures per 5 min per IP).
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        settings = get_settings()
+        password = settings.dashboard_password.get_secret_value()
+
+        # No password configured → auth disabled
+        if not password:
+            return await call_next(request)
+
+        path = request.url.path
+
+        # Only protect /api/ and /dashboard routes
+        if not (path.startswith("/api/") or path.startswith("/dashboard")):
+            return await call_next(request)
+
+        # Public paths bypass auth
+        if path in _AUTH_PUBLIC_PATHS:
+            return await call_next(request)
+
+        client_ip = request.client.host if request.client else "unknown"
+
+        # Rate limit check
+        if _is_rate_limited(client_ip):
+            logger.warning("Auth rate limited", ip=client_ip, path=path)
+            return JSONResponse(
+                status_code=429,
+                content={"status": "error", "message": "Too many failed attempts — try again later"},
+            )
+
+        # Check Authorization header
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            if hmac.compare_digest(token, password):
+                return await call_next(request)
+
+        # Check query param fallback (for browser access)
+        token_param = request.query_params.get("token", "")
+        if token_param and hmac.compare_digest(token_param, password):
+            return await call_next(request)
+
+        # Auth failed
+        _record_auth_failure(client_ip)
+        logger.warning("Unauthorized access attempt", ip=client_ip, path=path)
+
+        return JSONResponse(
+            status_code=401,
+            content={"status": "error", "message": "Unauthorized — set Authorization: Bearer <DASHBOARD_PASSWORD>"},
+        )
+
+
+app.add_middleware(DashboardAuthMiddleware)
+
+# CORS: restrict to same-origin by default; override via CORS_ORIGINS env var
+_cors_origins = os.environ.get("CORS_ORIGINS", "").strip()
+_allowed_origins = [o.strip() for o in _cors_origins.split(",") if o.strip()] if _cors_origins else []
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_allowed_origins,  # empty list = same-origin only
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
@@ -827,6 +967,21 @@ async def get_bot_status():
             "allowance": wallet_info.get("allowance", 0.0),
         },
         "warnings": wallet_info.get("warnings", []) + allowance_status.warnings,
+        # Risk management state (circuit breakers, loss tracking)
+        "risk": get_risk_manager().get_status_dict(),
+    }
+
+
+@app.get("/api/risk")
+async def get_risk_status():
+    """Get current risk management state.
+
+    Shows circuit breaker status, daily P&L, position limits,
+    and execution failure tracking.
+    """
+    return {
+        "status": "ok",
+        **get_risk_manager().get_status_dict(),
     }
 
 

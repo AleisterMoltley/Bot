@@ -16,15 +16,16 @@ from polybot.logging_setup import get_logger
 
 logger = get_logger(__name__)
 
-# Asset-specific annualized volatility defaults (updated from Binance 30d realized)
+# Asset-specific annualized volatility (CEX-implied, Binance 30d realized)
+# These are annualized — the model scales by sqrt(T) for 5-min windows.
 ASSET_VOLATILITY = {
-    "BTC": 0.45,
-    "ETH": 0.55,
-    "SOL": 0.75,
-    "XRP": 0.70,
-    "DOGE": 0.85,
+    "BTC": 1.20,
+    "ETH": 1.40,
+    "SOL": 1.80,
+    "XRP": 1.60,
+    "DOGE": 2.00,
 }
-DEFAULT_VOL = 0.50
+DEFAULT_VOL = 1.20
 
 # Edge discount factor: account for model uncertainty, fees, slippage
 # 0.6 = keep 60% of theoretical edge (conservative)
