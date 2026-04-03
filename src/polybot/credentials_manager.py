@@ -17,7 +17,7 @@ import os
 
 logger = logging.getLogger(__name__)
 
-CREDS_FILE = "/tmp/polymarket_creds.json"
+CREDS_FILE = None  # V91: Credentials no longer cached to disk (security fix)
 _REQUIRED_ENV_KEYS = ["POLY_API_KEY", "POLY_API_SECRET", "POLY_API_PASSPHRASE"]
 
 # Module-level singleton so other modules (executor.py) can import cached creds
@@ -43,20 +43,7 @@ def get_or_create_l2_creds() -> dict:
         _L2_CREDS = creds
         return creds
 
-    # Priority 2: cached on disk
-    if os.path.exists(CREDS_FILE):
-        try:
-            with open(CREDS_FILE) as f:
-                creds = json.load(f)
-            if all(creds.get(k) for k in ["api_key", "api_secret", "api_passphrase"]):
-                _export_to_env(creds)
-                _L2_CREDS = creds
-                logger.info("[CREDS] L2 credentials loaded from cache")
-                return creds
-        except Exception as e:
-            logger.warning(f"[CREDS] Cache read failed: {e}")
-
-    # Priority 3: derive fresh
+    # Priority 2: derive fresh from private key
     private_key = os.environ.get("POLYMARKET_PRIVATE_KEY")
     if not private_key:
         raise RuntimeError(
@@ -80,15 +67,7 @@ def get_or_create_l2_creds() -> dict:
 
     # Validate — all fields must be non-empty
     if not all(creds.values()):
-        raise RuntimeError(f"[CREDS] Derived credentials are empty: {creds}")
-
-    # Cache to disk for next restart
-    try:
-        with open(CREDS_FILE, "w") as f:
-            json.dump(creds, f)
-        logger.info("[CREDS] Credentials cached to /tmp/polymarket_creds.json")
-    except Exception as e:
-        logger.warning(f"[CREDS] Could not cache credentials: {e}")
+        raise RuntimeError("[CREDS] Derived credentials are empty")
 
     _export_to_env(creds)
     _L2_CREDS = creds
@@ -137,7 +116,7 @@ def validate_l2_creds(creds: dict) -> bool:
             ),
         )
         result = client.get_api_keys()
-        logger.info(f"[CREDS] L2 credentials validated OK: {result}")
+        logger.info("[CREDS] L2 credentials validated OK")
         return True
     except Exception as e:
         logger.error(f"[CREDS] L2 credential validation FAILED: {e}")

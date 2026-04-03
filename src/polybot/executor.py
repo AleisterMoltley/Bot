@@ -18,9 +18,7 @@ _client_lock = asyncio.Lock()
 
 
 def invalidate_l2_cache() -> None:
-    """Invalidate cached L2 credentials."""
-    if os.path.exists("/tmp/polymarket_creds.json"):
-        os.remove("/tmp/polymarket_creds.json")
+    """Invalidate cached L2 credentials from environment."""
     for key in ["POLY_API_KEY", "POLY_API_SECRET", "POLY_API_PASSPHRASE"]:
         os.environ.pop(key, None)
     log.info("L2 credential cache invalidated")
@@ -210,8 +208,21 @@ def place_trade(market: dict, outcome: str, amount: float, dry_run: bool = None)
         side=_outcome_to_side(outcome), current_price=current_price,
         market=market,
     )
-    if result:
-        log.info(f"[TRADE OK] {slug} ${amount} {outcome}")
+
+    # Track execution result in risk manager
+    try:
+        from polybot.risk_manager import get_risk_manager
+        rm = get_risk_manager()
+        if result:
+            rm.record_position_opened()
+            log.info(f"[TRADE OK] {slug} ${amount} {outcome}")
+        else:
+            rm.record_execution_failure()
+            log.warning(f"[TRADE FAILED] {slug} ${amount} {outcome}")
+    except Exception:
+        if result:
+            log.info(f"[TRADE OK] {slug} ${amount} {outcome}")
+
     return result
 
 
@@ -254,8 +265,21 @@ async def place_trade_async(
         amount_usdc=amount, side=_outcome_to_side(outcome),
         current_price=current_price, market=market,
     )
-    if result:
-        log.info(f"[TRADE OK] {slug} ${amount} {outcome}")
+
+    # Track execution result in risk manager
+    try:
+        from polybot.risk_manager import get_risk_manager
+        rm = get_risk_manager()
+        if result:
+            rm.record_position_opened()
+            log.info(f"[TRADE OK] {slug} ${amount} {outcome}")
+        else:
+            rm.record_execution_failure()
+            log.warning(f"[TRADE FAILED] {slug} ${amount} {outcome}")
+    except Exception:
+        if result:
+            log.info(f"[TRADE OK] {slug} ${amount} {outcome}")
+
     return result
 
 

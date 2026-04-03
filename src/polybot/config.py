@@ -223,11 +223,10 @@ class Settings(BaseSettings):
         alias="REDEEM_ONLY",
     )
 
-    # ── PRODUCTION DEFAULTS – Bot tradet jetzt wirklich ────────────
-    # PATCH 2026: Changed defaults for production trading
+    # ── SAFE DEFAULT – set DRY_RUN=false on Railway for live trading ────
     dry_run: bool = Field(
-        default=False,  # PATCH 2026: Bot now really trades
-        description="Live trading mode (set DRY_RUN=true to simulate)",
+        default=True,  # Safe default: simulation mode until explicitly disabled
+        description="Live trading mode (set DRY_RUN=false on Railway for real trades)",
         alias="DRY_RUN",
     )
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
@@ -284,10 +283,9 @@ class Settings(BaseSettings):
         description="Filter for 5-minute Up/Down crypto markets only",
         alias="UP_DOWN_ONLY",
     )
-    # TEST PATCH V9.1 – nur zum Testen (kann später wieder auf 0.010 gesetzt werden)
     min_ev: float = Field(
-        default=0.005,  # ← TEST: Temporär auf 0.5% gesenkt, um zu sehen, ob Trades kommen
-        description="TEST PATCH: Minimum Expected Value (0.005 = 0.5%) – nur für Testzwecke",
+        default=0.010,
+        description="Minimum Expected Value (0.010 = 1%) — below this, no trade",
         ge=0.0,
         le=1.0,
         alias="MIN_EV",

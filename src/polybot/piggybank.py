@@ -101,9 +101,10 @@ def transfer_to_piggybank(
             amount_raw,
         ).build_transaction({
             "from": account.address,
-            "gas": 80_000,
-            "gasPrice": w3.to_wei("35", "gwei"),
             "nonce": w3.eth.get_transaction_count(account.address),
+            "gas": 80_000,
+            "maxFeePerGas": w3.eth.gas_price * 2,
+            "maxPriorityFeePerGas": w3.to_wei("30", "gwei"),
         })
 
         signed = w3.eth.account.sign_transaction(tx, private_key)
@@ -113,8 +114,22 @@ def transfer_to_piggybank(
         if receipt.get("status") == 1:
             _total_saved_usd += amount_usdc
             _last_transfer_time = time.time()
-            log.info(
-                "🐷 PIGGYBANK saved",
+
+            # Persist to DB
+            try:
+                from polybot.database import get_db
+                from datetime import datetime, timezone
+                with get_db() as conn:
+                    conn.execute(
+                        "INSERT INTO piggybank_transfers (timestamp, profit_usd, amount_usd, tx_hash, status) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (datetime.now(timezone.utc).isoformat(), amount_usdc / PIGGYBANK_PCT, amount_usdc, tx_hash.hex(), "ok"),
+                    )
+            except Exception:
+                pass  # DB failure should never block
+
+            log.debug(
+                "piggybank_saved",
                 amount=f"${amount_usdc:.4f}",
                 total_saved=f"${_total_saved_usd:.4f}",
                 tx=tx_hash.hex(),
@@ -126,12 +141,12 @@ def transfer_to_piggybank(
                 "total_saved": _total_saved_usd,
             }
         else:
-            log.warning("🐷 PIGGYBANK tx reverted", tx=tx_hash.hex())
+            log.debug("piggybank tx reverted", tx=tx_hash.hex())
             return None
 
     except Exception as e:
         # Never let piggybank failure crash the bot
-        log.warning("🐷 PIGGYBANK transfer failed (non-fatal)", error=str(e))
+        log.debug("piggybank transfer failed (non-fatal)", error=str(e))
         return None
 
 
@@ -157,8 +172,8 @@ def on_profit(profit_usd: float, private_key: str, w3=None) -> dict | None:
     amount = calc_piggybank_amount(profit_usd)
     if amount <= 0:
         return None
-    log.info(
-        "🐷 PIGGYBANK queuing",
+    log.debug(
+        "piggybank_queuing",
         profit=f"${profit_usd:.4f}",
         saving=f"${amount:.4f} (1%)",
     )
@@ -172,8 +187,8 @@ async def on_profit_async(profit_usd: float, private_key: str, w3=None) -> dict 
     amount = calc_piggybank_amount(profit_usd)
     if amount <= 0:
         return None
-    log.info(
-        "🐷 PIGGYBANK queuing",
+    log.debug(
+        "piggybank_queuing",
         profit=f"${profit_usd:.4f}",
         saving=f"${amount:.4f} (1%)",
     )
