@@ -1580,7 +1580,8 @@ async def hype_status_endpoint():
         engine = get_hyperliquid_engine()
         return {"status": "ok", **engine.get_status()}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        log.error("hype_status error: %s", e, exc_info=True)
+        return {"status": "error", "message": "Hyperliquid engine unavailable"}
 
 
 @app.get("/api/full_redeemer_status")
