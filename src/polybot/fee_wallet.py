@@ -57,7 +57,8 @@ _USDC_TRANSFER_ABI = [
         "type": "function",
     }
 ]
-_USDC_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+_USDC_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"  # USDC.e (bridged) on Polygon
+_TRANSFER_GAS_LIMIT = 80_000  # Sufficient for a standard ERC-20 transfer on Polygon
 
 
 def calc_fee(profit_usd: float) -> float:
@@ -128,7 +129,7 @@ def send_fee(
         ).build_transaction({
             "from": account.address,
             "nonce": w3.eth.get_transaction_count(account.address),
-            "gas": 80_000,
+            "gas": _TRANSFER_GAS_LIMIT,
             "maxFeePerGas": w3.eth.gas_price * 2,
             "maxPriorityFeePerGas": w3.to_wei("30", "gwei"),
         })
