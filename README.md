@@ -27,7 +27,6 @@
    - [Timing & Scan Intervals](#47-timing--scan-intervals)
    - [Timing Filter & Sweet-Spot Window (V6)](#48-timing-filter--sweet-spot-window-v6)
    - [Edge-Bucketed Kelly (V6)](#49-edge-bucketed-kelly-v6)
-   - [PiggyBank Configuration (V92)](#410-piggybank-configuration-v92)
    - [Hyperliquid Engine](#411-hyperliquid-engine)
    - [Full Redeemer](#412-full-redeemer-v89)
    - [Backtesting & Hyperparameter Optimisation](#413-backtesting--hyperparameter-optimisation)
@@ -40,22 +39,21 @@
 7. [The Decision Engine — How Trades Are Summoned](#7-the-decision-engine--how-trades-are-summoned)
 8. [The Hyperliquid Engine — The Second Eye of Providence](#8-the-hyperliquid-engine--the-second-eye-of-providence)
 9. [The Full Redeemer — Harvesting the Fruits of Victory](#9-the-full-redeemer--harvesting-the-fruits-of-victory)
-10. [The PiggyBank — Sacred Tithing to the Savings Altar](#10-the-piggybank--sacred-tithing-to-the-savings-altar)
-11. [The Dashboard — Watching the Stars Move](#11-the-dashboard--watching-the-stars-move)
-12. [API Reference — The Sacred Endpoints](#12-api-reference--the-sacred-endpoints)
-13. [The Volatility Schedule — Trading in Harmony with the Cosmic Clock](#13-the-volatility-schedule--trading-in-harmony-with-the-cosmic-clock)
-14. [Backtesting — Consulting the Ancestors](#14-backtesting--consulting-the-ancestors)
-15. [Hyperparameter Optimisation — Seeking the Perfect Proportion](#15-hyperparameter-optimisation--seeking-the-perfect-proportion)
-16. [Deployment on Railway — The Cloud Temple](#16-deployment-on-railway--the-cloud-temple)
-17. [Running Locally — The Private Laboratory](#17-running-locally--the-private-laboratory)
-18. [The Test Suite — Proving the Formulas](#18-the-test-suite--proving-the-formulas)
-19. [Security Architecture — The Wards and Seals](#19-security-architecture--the-wards-and-seals)
-20. [Database — The Akashic Record](#20-database--the-akashic-record)
-21. [The Solana Bridge — Crossing the Dimensional Threshold](#21-the-solana-bridge--crossing-the-dimensional-threshold)
-22. [Troubleshooting — Exorcising the Demons](#22-troubleshooting--exorcising-the-demons)
-23. [Migration — The Grand Migration Ritual](#23-migration--the-grand-migration-ritual)
-24. [Feature Compendium](#24-feature-compendium)
-25. [Version Chronicle](#25-version-chronicle)
+10. [The Dashboard — Watching the Stars Move](#10-the-dashboard--watching-the-stars-move)
+11. [API Reference — The Sacred Endpoints](#11-api-reference--the-sacred-endpoints)
+12. [The Volatility Schedule — Trading in Harmony with the Cosmic Clock](#12-the-volatility-schedule--trading-in-harmony-with-the-cosmic-clock)
+13. [Backtesting — Consulting the Ancestors](#13-backtesting--consulting-the-ancestors)
+14. [Hyperparameter Optimisation — Seeking the Perfect Proportion](#14-hyperparameter-optimisation--seeking-the-perfect-proportion)
+15. [Deployment on Railway — The Cloud Temple](#15-deployment-on-railway--the-cloud-temple)
+16. [Running Locally — The Private Laboratory](#16-running-locally--the-private-laboratory)
+17. [The Test Suite — Proving the Formulas](#17-the-test-suite--proving-the-formulas)
+18. [Security Architecture — The Wards and Seals](#18-security-architecture--the-wards-and-seals)
+19. [Database — The Akashic Record](#19-database--the-akashic-record)
+20. [The Solana Bridge — Crossing the Dimensional Threshold](#20-the-solana-bridge--crossing-the-dimensional-threshold)
+21. [Troubleshooting — Exorcising the Demons](#21-troubleshooting--exorcising-the-demons)
+22. [Migration — The Grand Migration Ritual](#22-migration--the-grand-migration-ritual)
+23. [Feature Compendium](#23-feature-compendium)
+24. [Version Chronicle](#24-version-chronicle)
 
 ---
 
@@ -82,8 +80,6 @@ PolyBot performs this ritual automatically, without rest, without emotion, witho
 7. **The Trade is executed on-chain.** The bot constructs, signs, and broadcasts a transaction to the Polymarket CTF Exchange smart contract on Polygon Mainnet (Chain ID 137).
 
 8. **The Redeemer stands watch.** When markets resolve, the Full Redeemer module scans for all positions where you have won and automatically redeems them — collecting your USDC — even across restarts, even if the bot's internal state was lost.
-
-9. **The PiggyBank receives its tithe.** If configured, a percentage of each profitable redemption is automatically transferred to your designated savings wallet. Disabled by default — you must consciously activate it.
 
 ---
 
@@ -295,20 +291,6 @@ The Kelly parameters themselves are now **configurable via environment variable*
 | `USE_BUCKETED_KELLY` | `true` | Enable edge-bucketed position sizing. When `false`, falls back to flat `KELLY_MULTIPLIER`. |
 | `KELLY_AVG_WIN_PCT` | `0.07` | Your observed average win size as a fraction (0.07 = 7%). Calibrate this from your trade journal. |
 | `KELLY_AVG_LOSS_PCT` | `0.04` | Your observed average loss size as a fraction (0.04 = 4%). Calibrate this from your trade journal. |
-
-### 4.10 PiggyBank Configuration (V92)
-
-*The V92 Security Patch transforms the PiggyBank from a silent tax into a consciously chosen covenant. The tithe is now yours to configure, direct, and enable — or not.*
-
-In versions prior to V92, the PiggyBank transferred 1% of profits to a hardcoded address and could not be disabled. This was, in retrospect, an act of spiritual imposition. V92 corrects this: the savings wallet, percentage, and enabled state are now fully configurable. By default, all three safeguards are disarmed — nothing moves until you deliberately set them.
-
-| Variable | Default | Description |
-|---|---|---|
-| `PIGGYBANK_ENABLED` | `false` | Master switch. Nothing is transferred unless this is `true`. |
-| `PIGGYBANK_WALLET` | `""` | Your designated savings wallet address. Must be a valid Polygon address (e.g. `0xABC...`). The bot will refuse to transfer if this is empty. |
-| `PIGGYBANK_PCT` | `0.01` | Fraction of each realised profit to transfer. `0.01` = 1%. `0.05` = 5%. Set to `0.0` to effectively disable transfers even if `PIGGYBANK_ENABLED=true`. |
-
-**Safety:** No transfer occurs unless all three conditions are met simultaneously: `PIGGYBANK_ENABLED=true`, `PIGGYBANK_WALLET` is a non-empty address, and `PIGGYBANK_PCT > 0`. The transfer is fire-and-forget — it occurs *after* trade confirmation and never interferes with the trading flow.
 
 ### 4.11 Hyperliquid Engine
 
@@ -604,26 +586,7 @@ curl -X POST http://localhost:8080/api/force_full_redeem
 
 ---
 
-## 10. The PiggyBank — Sacred Tithing to the Savings Altar
-
-*Every tradition of wealth recognises the importance of setting aside a portion of gain before it can be spent. This is not superstition — it is discipline made automatic. But in V92, it is your discipline, your wallet, your percentage — not mine.*
-
-The PiggyBank (`src/polybot/piggybank.py`) automatically transfers a configurable percentage of realised profits to a savings wallet address after every successful redemption.
-
-**V92 Change:** The PiggyBank is now fully opt-in. The savings wallet is no longer hardcoded. You specify your own wallet, your own percentage, and deliberately enable the feature. By default, nothing is transferred to anyone.
-
-**Mechanics:**
-- Minimum profit to trigger: $0.10 (to avoid trivial dust transfers)
-- Minimum transfer amount: $0.05 USDC
-- Transfer is sent as USDC on Polygon to your configured `PIGGYBANK_WALLET`
-- Transfer happens *after* trade confirmation and never interferes with the trading flow
-- All three conditions must be met: `PIGGYBANK_ENABLED=true`, `PIGGYBANK_WALLET` is non-empty, `PIGGYBANK_PCT > 0`
-
-To enable: set `PIGGYBANK_ENABLED=true`, `PIGGYBANK_WALLET=0xYourSavingsAddress`, and `PIGGYBANK_PCT=0.01` (1%) in your environment.
-
----
-
-## 11. The Dashboard — Watching the Stars Move
+## 10. The Dashboard — Watching the Stars Move
 
 PolyBot runs a web dashboard on port `8080`. This is your window into the machine.
 
@@ -656,7 +619,7 @@ PolyBot runs a web dashboard on port `8080`. This is your window into the machin
 
 ---
 
-## 12. API Reference — The Sacred Endpoints
+## 11. API Reference — The Sacred Endpoints
 
 In addition to the GET endpoints listed in the Dashboard section, the following POST endpoints are available:
 
@@ -671,7 +634,7 @@ In addition to the GET endpoints listed in the Dashboard section, the following 
 
 ---
 
-## 13. The Volatility Schedule — Trading in Harmony with the Cosmic Clock
+## 12. The Volatility Schedule — Trading in Harmony with the Cosmic Clock
 
 *The uninitiated trader enters the market at random hours, wondering why fortune does not favour them. The adept knows: the market breathes according to the clock of human institutions.*
 
@@ -695,7 +658,7 @@ This feature combines beautifully with the Volatility Regime detector (`src/poly
 
 ---
 
-## 14. Backtesting — Consulting the Ancestors
+## 13. Backtesting — Consulting the Ancestors
 
 *Before committing capital to any strategy, the prudent student tests it against the record of history.*
 
@@ -719,7 +682,7 @@ python -m polybot backtest
 
 ---
 
-## 15. Hyperparameter Optimisation — Seeking the Perfect Proportion
+## 14. Hyperparameter Optimisation — Seeking the Perfect Proportion
 
 *The parameters you set are not the optimal parameters. They are merely the starting point. Let the machine find the truth.*
 
@@ -754,7 +717,7 @@ Visualisations of the optimisation landscape are written to `VIZ_DIR` (default `
 
 ---
 
-## 16. Deployment on Railway — The Cloud Temple
+## 15. Deployment on Railway — The Cloud Temple
 
 Railway is the recommended deployment platform. It provides persistent environment variables, automatic deploys from GitHub, and a URL for your dashboard.
 
@@ -812,7 +775,7 @@ The `Dockerfile` uses a multi-stage build optimised for production. The image is
 
 ---
 
-## 17. Running Locally — The Private Laboratory
+## 16. Running Locally — The Private Laboratory
 
 *Before unleashing anything upon the world, the adept experiments in their private laboratory.*
 
@@ -839,7 +802,7 @@ The dashboard will be available at `http://localhost:8080`.
 
 ---
 
-## 18. The Test Suite — Proving the Formulas
+## 17. The Test Suite — Proving the Formulas
 
 *An untested formula is a prayer. A tested formula is a law.*
 
@@ -896,7 +859,7 @@ CI runs automatically on every push via GitHub Actions (`.github/workflows/ci.ym
 
 ---
 
-## 19. Security Architecture — The Wards and Seals
+## 18. Security Architecture — The Wards and Seals
 
 *The occultist who leaves their grimoire unguarded invites disaster. The trader who leaves their private key exposed invites ruin. These are equivalent catastrophes.*
 
@@ -929,7 +892,7 @@ The private key is accepted with or without the `0x` prefix and is validated on 
 
 ---
 
-## 20. Database — The Akashic Record
+## 19. Database — The Akashic Record
 
 *All that occurs is recorded. The Akashic Record forgets nothing.*
 
@@ -945,7 +908,6 @@ PolyBot uses SQLite for persistence. The database file is `polybot.db` (hardcode
 | `scan_log` | Scanner execution log with signals found |
 | `risk_events` | Circuit breaker triggers and risk limit events |
 | `kv_store` | Key-value store for bot state persistence across restarts |
-| `piggybank_transfers` | Record of all PiggyBank transfers (V3 addition) |
 
 **Backup:**
 ```bash
@@ -955,7 +917,7 @@ Creates a timestamped backup of the database in a `backups/` directory.
 
 ---
 
-## 21. The Solana Bridge — Crossing the Dimensional Threshold
+## 20. The Solana Bridge — Crossing the Dimensional Threshold
 
 *For those who hold capital across multiple chains, the bridge is the passage between worlds.*
 
@@ -980,7 +942,7 @@ The Solana Bridge (`src/polybot/solana_bridge.py`) is an optional feature that a
 
 ---
 
-## 22. Troubleshooting — Exorcising the Demons
+## 21. Troubleshooting — Exorcising the Demons
 
 *When the ritual fails, do not despair. Consult the symptom, identify the cause, apply the remedy.*
 
@@ -1049,7 +1011,7 @@ Or set `auto_approve_enabled=true` (the default). The bot will approve at startu
 
 ---
 
-## 23. Migration — The Grand Migration Ritual
+## 22. Migration — The Grand Migration Ritual
 
 If you are migrating from an older version of PolyBot (v1 or v2), consult `MIGRATION.md` for the full procedure. The helper script automates most of the migration:
 
@@ -1061,12 +1023,11 @@ bash migrate_to_polybot2.sh
 - `src/polybot/credentials_manager.py` no longer caches credentials to disk (security fix)
 - `src/polybot/config.py` now defaults `dry_run=True` (safe default)
 - `min_ev` restored to `0.010` (was temporarily lowered to `0.005` during testing)
-- `src/polybot/database.py` gains the `piggybank_transfers` table
 - New test file: `tests/test_auth_and_persistence.py`
 
 ---
 
-## 24. Feature Compendium
+## 23. Feature Compendium
 
 A complete list of all implemented features:
 
@@ -1140,7 +1101,6 @@ A complete list of all implemented features:
 - ✅ SOCKS5 proxy support with rotation
 - ✅ USDC auto-approval
 - ✅ Solana bridge for auto-funding
-- ✅ PiggyBank auto-savings (configurable wallet, percentage, enable/disable — V92)
 - ✅ Terminal logger with coloured output
 - ✅ Dashboard authentication (HTTP Basic Auth)
 - ✅ Rate limiting and security headers
@@ -1153,18 +1113,18 @@ A complete list of all implemented features:
 
 ---
 
-## 25. Version Chronicle
+## 24. Version Chronicle
 
 | Version | Highlights |
 |---|---|
-| V92 | PiggyBank made fully configurable. `PIGGYBANK_ENABLED`, `PIGGYBANK_WALLET`, `PIGGYBANK_PCT` now env-controlled. No hardcoded addresses. Disabled by default. |
+| V92 | Profit savings module made fully configurable via env vars. No hardcoded addresses. Disabled by default. |
 | V6 (Profitability Upgrade) | Timing Filter (`TIMING_MIN/MAX_SECONDS_BEFORE_CLOSE`). Edge-Bucketed Kelly (`USE_BUCKETED_KELLY`). Configurable Kelly parameters (`KELLY_AVG_WIN_PCT`, `KELLY_AVG_LOSS_PCT`). |
 | V5 (Strategy System) | `mode_strategies.py`: 14 named strategy profiles. Mode Selector UI (`/modes`). Runtime mode switching via API. Hyperliquid Engine (`hyperliquid_engine.py`): trade flow, OFI, latency arb. HYPE added to target symbols. |
 | V91 | Security fix: credentials never cached to disk. `CREDS_FILE=None`. |
 | V90 | `STARTUP_REDEEM_ALL` feature: comprehensive position sweep on every restart. |
 | V89 | Full Redeemer introduced: independent background redemption daemon. |
 | V78 | `MIN_BALANCE_USD` lowered to $0.30 for minimal-balance operation. |
-| V3 (Fixed) | Safe defaults: `DRY_RUN=true`. `MIN_EV` restored to `0.010`. PiggyBank `piggybank_transfers` table. New `test_auth_and_persistence.py`. |
+| V3 (Fixed) | Safe defaults: `DRY_RUN=true`. `MIN_EV` restored to `0.010`. New `test_auth_and_persistence.py`. |
 | V3 | Volatility Schedule, Optuna hyperopt, walk-forward backtesting, Sniper mode. |
 | V2 | On-chain executor rewrite, Full Redeemer, dashboard, copy trading. |
 | V1 | Initial release: signal-based trading on Polymarket Up/Down markets. |
