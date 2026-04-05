@@ -1,10 +1,8 @@
-"""Piggybank — Auto-save 1% of all profits to a savings wallet.
+"""Piggybank — Auto-save percentage of profits to a savings wallet.
 
-Hardcoded savings wallet. After every profitable redeem or trade,
-1% of the profit is sent as USDC on Polygon to the piggybank.
-
-This runs AFTER the redeem/trade is confirmed, so it never
-interferes with the trading flow.
+DISABLED BY DEFAULT (V92 Security Patch).
+Set PIGGYBANK_ENABLED=true AND PIGGYBANK_WALLET=<your_wallet> in env to enable.
+Percentage configurable via PIGGYBANK_PCT (default: 0.0 = off).
 """
 
 from __future__ import annotations
@@ -15,9 +13,23 @@ from polybot.logging_setup import get_logger
 
 log = get_logger(__name__)
 
-# ── HARDCODED SAVINGS WALLET ──
-PIGGYBANK_WALLET = "0x978982EB8A854e53DD154a0dc89ecb4d54f11FBf"
-PIGGYBANK_PCT = 0.01  # 1% of profit
+# ── CONFIGURABLE SAVINGS WALLET (reads from Pydantic config) ──
+def _load_piggybank_config() -> tuple[str, float, bool]:
+    """Load piggybank config from settings (with env fallback)."""
+    try:
+        from polybot.config import get_settings
+        s = get_settings()
+        return s.piggybank_wallet, s.piggybank_pct, s.piggybank_enabled
+    except Exception:
+        import os
+        return (
+            os.environ.get("PIGGYBANK_WALLET", ""),
+            float(os.environ.get("PIGGYBANK_PCT", "0.0")),
+            os.environ.get("PIGGYBANK_ENABLED", "false").lower() in ("true", "1"),
+        )
+
+
+PIGGYBANK_WALLET, PIGGYBANK_PCT, PIGGYBANK_ENABLED = _load_piggybank_config()
 
 # Track total saved
 _total_saved_usd: float = 0.0
@@ -37,8 +49,10 @@ def calc_piggybank_amount(profit_usd: float) -> float:
         profit_usd: Profit from a trade/redeem in USD
 
     Returns:
-        Amount to transfer (0.0 if below threshold)
+        Amount to transfer (0.0 if below threshold or disabled)
     """
+    if not PIGGYBANK_ENABLED or PIGGYBANK_PCT <= 0 or not PIGGYBANK_WALLET:
+        return 0.0
     if profit_usd <= MIN_PROFIT_TO_SAVE:
         return 0.0
     amount = profit_usd * PIGGYBANK_PCT
@@ -65,6 +79,9 @@ def transfer_to_piggybank(
     global _total_saved_usd, _last_transfer_time
 
     if amount_usdc < MIN_TRANSFER_USDC:
+        return None
+
+    if not PIGGYBANK_ENABLED or not PIGGYBANK_WALLET:
         return None
 
     try:

@@ -531,7 +531,47 @@ async def lifespan(app: FastAPI):
         f"DRY_RUN={settings.dry_run} | Mode={settings.mode}"
     )
     yield
-    logger.info("🛑 PolyBot FastAPI shutting down")
+
+    # ── GRACEFUL SHUTDOWN: Stop all background tasks cleanly ──
+    logger.info("🛑 PolyBot FastAPI shutting down — stopping background tasks...")
+
+    # Stop Signal Engine (Binance WebSockets)
+    try:
+        from polybot.signal_engine import get_signal_engine
+        engine = get_signal_engine()
+        if engine._running:
+            await engine.stop()
+            logger.info("✅ Signal Engine stopped")
+    except Exception as e:
+        logger.debug("Signal Engine stop: %s", e)
+
+    # Stop Hyperliquid Engine
+    try:
+        from polybot.hyperliquid_engine import get_hyperliquid_engine, is_hyperliquid_enabled
+        if is_hyperliquid_enabled():
+            hype = get_hyperliquid_engine()
+            if hype._running:
+                await hype.stop()
+                logger.info("✅ Hyperliquid Engine stopped")
+    except Exception as e:
+        logger.debug("Hyperliquid Engine stop: %s", e)
+
+    # Cancel all running asyncio tasks created by this app
+    try:
+        import asyncio
+        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        if tasks:
+            logger.info(f"🛑 Cancelling {len(tasks)} background tasks...")
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            logger.info("✅ All background tasks cancelled")
+    except Exception as e:
+        logger.debug("Task cancellation: %s", e)
+
+    # Final backup
+    _perform_backup()
+    logger.info("✅ Graceful shutdown complete")
 
 
 async def _run_startup_checks_async(
@@ -1458,6 +1498,90 @@ async def force_full_redeem_endpoint():
             "successful": 0,
             "failed": 0,
         }
+
+
+# ── MODE SELECTOR ──────────────────────────────────────────────────
+
+# Runtime mode override (survives without restart, lost on redeploy)
+_runtime_mode_override: dict[str, Any] = {}
+
+
+@app.get("/modes", include_in_schema=False)
+async def modes_page():
+    """Serve the mode selector UI."""
+    static_dir = Path(__file__).resolve().parents[2] / "static"
+    modes_file = static_dir / "modes.html"
+    if not modes_file.exists():
+        modes_file = Path("/app/static/modes.html")
+    return FileResponse(str(modes_file), media_type="text/html")
+
+
+@app.get("/api/mode")
+async def get_mode():
+    """Return the current active mode and sub-config."""
+    settings = get_settings()
+    base_mode = _runtime_mode_override.get("mode", settings.mode)
+    ui_mode = _runtime_mode_override.get("ui_mode", base_mode)
+    return {
+        "mode": base_mode,
+        "ui_mode": ui_mode,
+        "sub": _runtime_mode_override.get("sub"),
+        "snipe_window": _runtime_mode_override.get("snipe_window"),
+    }
+
+
+@app.post("/api/mode")
+async def set_mode(request: Request):
+    """Switch operating mode at runtime.
+
+    Body JSON:
+        ui_mode: str   – frontend key (e.g. sniper45, demonscalp)
+        mode: str      – backend mode enum value
+        sub: str|null  – sub-strategy identifier
+        snipe_window: int|null – sniper window seconds
+    """
+    global _runtime_mode_override
+    body = await request.json()
+    new_mode = body.get("mode", "updown")
+
+    valid_modes = ("signal", "copy", "arbitrage", "all", "updown", "backtest", "hyperopt", "sniper")
+    if new_mode not in valid_modes:
+        return JSONResponse(
+            status_code=400,
+            content={"detail": f"Invalid mode: {new_mode}. Valid: {valid_modes}"},
+        )
+
+    _runtime_mode_override = {
+        "mode": new_mode,
+        "ui_mode": body.get("ui_mode", new_mode),
+        "sub": body.get("sub"),
+        "snipe_window": body.get("snipe_window"),
+    }
+
+    logger.info(
+        f"🔄 MODE SWITCHED → {new_mode.upper()}"
+        f" (ui={body.get('ui_mode')}, sub={body.get('sub')}, window={body.get('snipe_window')})"
+    )
+
+    return {
+        "status": "ok",
+        "message": f"Mode switched to {body.get('ui_mode', new_mode)}",
+        **_runtime_mode_override,
+    }
+
+
+@app.get("/api/hype_status")
+async def hype_status_endpoint():
+    """Get Hyperliquid engine status — prices, trade counts, signals."""
+    try:
+        from polybot.hyperliquid_engine import get_hyperliquid_engine, is_hyperliquid_enabled
+        if not is_hyperliquid_enabled() and _runtime_mode_override.get("sub") != "hype":
+            return {"status": "disabled", "message": "HYPE mode not active"}
+        engine = get_hyperliquid_engine()
+        return {"status": "ok", **engine.get_status()}
+    except Exception as e:
+        log.error("hype_status error: %s", e, exc_info=True)
+        return {"status": "error", "message": "Hyperliquid engine unavailable"}
 
 
 @app.get("/api/full_redeemer_status")

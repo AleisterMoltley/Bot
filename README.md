@@ -4,7 +4,7 @@
 
 ---
 
-**PolyBot** is an autonomous algorithmic trading entity that operates upon [Polymarket](https://polymarket.com), the on-chain prediction market. It specialises in **5-minute Up/Down crypto markets** — ephemeral little duels where the question is simply: will Bitcoin, Ethereum, or Solana rise or fall in the next five minutes? The bot watches, calculates, and strikes with the precision of a numerologist computing the sacred ratios.
+**PolyBot** is an autonomous algorithmic trading entity that operates upon [Polymarket](https://polymarket.com), the on-chain prediction market. It specialises in **5-minute Up/Down crypto markets** — ephemeral little duels where the question is simply: will Bitcoin, Ethereum, Solana, or HYPE rise or fall in the next five minutes? The bot watches, calculates, and strikes with the precision of a numerologist computing the sacred ratios. In its latest incarnation it draws upon not one but *two* celestial data streams — Binance and Hyperliquid — and selects from fourteen distinct strategic grimoires, each tuned to a specific philosophy of market exploitation.
 
 > ⚠️ **This instrument wields real money on a live blockchain.** No sandbox protects you from yourself. Configure it wrong and you shall be parted from your capital with a swiftness that would make even the most hardened occultist weep. The author — Aleister Moltley — accepts no liability.
 
@@ -25,31 +25,37 @@
    - [Market Filters](#45-market-filters)
    - [Risk Management](#46-risk-management)
    - [Timing & Scan Intervals](#47-timing--scan-intervals)
-   - [Full Redeemer](#48-full-redeemer-v89)
-   - [Backtesting & Hyperparameter Optimisation](#49-backtesting--hyperparameter-optimisation)
-   - [Copy Trading](#410-copy-trading--whale-tracking)
-   - [Volatility Schedule](#411-the-volatility-schedule)
-   - [Proxy Settings](#412-proxy-settings-geo-bypass)
-   - [Dashboard Authentication](#413-dashboard-authentication)
-5. [Operating Modes — The Eight Schools of Thought](#5-operating-modes--the-eight-schools-of-thought)
-6. [The Decision Engine — How Trades Are Summoned](#6-the-decision-engine--how-trades-are-summoned)
-7. [The Full Redeemer — Harvesting the Fruits of Victory](#7-the-full-redeemer--harvesting-the-fruits-of-victory)
-8. [The PiggyBank — Sacred Tithing to the Savings Altar](#8-the-piggybank--sacred-tithing-to-the-savings-altar)
-9. [The Dashboard — Watching the Stars Move](#9-the-dashboard--watching-the-stars-move)
-10. [API Reference — The Sacred Endpoints](#10-api-reference--the-sacred-endpoints)
-11. [The Volatility Schedule — Trading in Harmony with the Cosmic Clock](#11-the-volatility-schedule--trading-in-harmony-with-the-cosmic-clock)
-12. [Backtesting — Consulting the Ancestors](#12-backtesting--consulting-the-ancestors)
-13. [Hyperparameter Optimisation — Seeking the Perfect Proportion](#13-hyperparameter-optimisation--seeking-the-perfect-proportion)
-14. [Deployment on Railway — The Cloud Temple](#14-deployment-on-railway--the-cloud-temple)
-15. [Running Locally — The Private Laboratory](#15-running-locally--the-private-laboratory)
-16. [The Test Suite — Proving the Formulas](#16-the-test-suite--proving-the-formulas)
-17. [Security Architecture — The Wards and Seals](#17-security-architecture--the-wards-and-seals)
-18. [Database — The Akashic Record](#18-database--the-akashic-record)
-19. [The Solana Bridge — Crossing the Dimensional Threshold](#19-the-solana-bridge--crossing-the-dimensional-threshold)
-20. [Troubleshooting — Exorcising the Demons](#20-troubleshooting--exorcising-the-demons)
-21. [Migration — The Grand Migration Ritual](#21-migration--the-grand-migration-ritual)
-22. [Feature Compendium](#22-feature-compendium)
-23. [Version Chronicle](#23-version-chronicle)
+   - [Timing Filter & Sweet-Spot Window (V6)](#48-timing-filter--sweet-spot-window-v6)
+   - [Edge-Bucketed Kelly (V6)](#49-edge-bucketed-kelly-v6)
+   - [PiggyBank Configuration (V92)](#410-piggybank-configuration-v92)
+   - [Hyperliquid Engine](#411-hyperliquid-engine)
+   - [Full Redeemer](#412-full-redeemer-v89)
+   - [Backtesting & Hyperparameter Optimisation](#413-backtesting--hyperparameter-optimisation)
+   - [Copy Trading](#414-copy-trading--whale-tracking)
+   - [Volatility Schedule](#415-the-volatility-schedule)
+   - [Proxy Settings](#416-proxy-settings-geo-bypass)
+   - [Dashboard Authentication](#417-dashboard-authentication)
+5. [Operating Modes — The Fourteen Schools of Thought](#5-operating-modes--the-fourteen-schools-of-thought)
+6. [The Mode Selector — Switching Grimoires at Runtime](#6-the-mode-selector--switching-grimoires-at-runtime)
+7. [The Decision Engine — How Trades Are Summoned](#7-the-decision-engine--how-trades-are-summoned)
+8. [The Hyperliquid Engine — The Second Eye of Providence](#8-the-hyperliquid-engine--the-second-eye-of-providence)
+9. [The Full Redeemer — Harvesting the Fruits of Victory](#9-the-full-redeemer--harvesting-the-fruits-of-victory)
+10. [The PiggyBank — Sacred Tithing to the Savings Altar](#10-the-piggybank--sacred-tithing-to-the-savings-altar)
+11. [The Dashboard — Watching the Stars Move](#11-the-dashboard--watching-the-stars-move)
+12. [API Reference — The Sacred Endpoints](#12-api-reference--the-sacred-endpoints)
+13. [The Volatility Schedule — Trading in Harmony with the Cosmic Clock](#13-the-volatility-schedule--trading-in-harmony-with-the-cosmic-clock)
+14. [Backtesting — Consulting the Ancestors](#14-backtesting--consulting-the-ancestors)
+15. [Hyperparameter Optimisation — Seeking the Perfect Proportion](#15-hyperparameter-optimisation--seeking-the-perfect-proportion)
+16. [Deployment on Railway — The Cloud Temple](#16-deployment-on-railway--the-cloud-temple)
+17. [Running Locally — The Private Laboratory](#17-running-locally--the-private-laboratory)
+18. [The Test Suite — Proving the Formulas](#18-the-test-suite--proving-the-formulas)
+19. [Security Architecture — The Wards and Seals](#19-security-architecture--the-wards-and-seals)
+20. [Database — The Akashic Record](#20-database--the-akashic-record)
+21. [The Solana Bridge — Crossing the Dimensional Threshold](#21-the-solana-bridge--crossing-the-dimensional-threshold)
+22. [Troubleshooting — Exorcising the Demons](#22-troubleshooting--exorcising-the-demons)
+23. [Migration — The Grand Migration Ritual](#23-migration--the-grand-migration-ritual)
+24. [Feature Compendium](#24-feature-compendium)
+25. [Version Chronicle](#25-version-chronicle)
 
 ---
 
@@ -61,21 +67,23 @@ Every five minutes, thousands of small prediction markets blink into existence o
 
 PolyBot performs this ritual automatically, without rest, without emotion, without the trembling hand of a gambler at the table. Here is what transpires during each cycle (every 12 seconds by default):
 
-1. **The Scanner awakens.** It queries the Polymarket CLOB API and locates all active 5-minute Up/Down markets for BTC, ETH, and SOL. There are typically ~2,395 such markets in flight at any moment.
+1. **The Scanner awakens.** It queries the Polymarket CLOB API and locates all active 5-minute Up/Down markets for BTC, ETH, SOL, and HYPE. There are typically ~2,395 such markets in flight at any moment.
 
 2. **The Filter is applied.** Only markets meeting the liquidity covenant are considered: minimum $200 liquidity and $100 in 24-hour volume. Thin markets are ignored — they are traps for the unwary.
 
-3. **The Edge Engine is consulted.** For each candidate market, the bot fetches live price data from Binance and computes a multi-factor signal using: Moving Average crossover, RSI (14-period, overbought at 70 / oversold at 30), MACD (12/26/9), momentum, and volume momentum. Each signal is weighted and combined into a directional confidence score.
+3. **The Edge Engine is consulted.** For each candidate market, the bot fetches live price data from Binance (and optionally Hyperliquid) and computes a multi-factor signal using: Moving Average crossover, RSI (14-period, overbought at 70 / oversold at 30), MACD (12/26/9), momentum, and volume momentum. Each signal is weighted and combined into a directional confidence score. When the Hyperliquid engine is active, its OFI and trade-flow signals may strengthen, weaken, or veto the final verdict.
 
-4. **The EV Oracle pronounces judgment.** The Expected Value of each potential trade is calculated. If the edge falls below `MIN_EV` (default 1.0%) or the confidence below `MIN_CONFIDENCE_FILTER` (default 65%), the bot abstains. Abstinence is wisdom.
+4. **The Timing Oracle speaks.** Before any trade is considered, the bot consults the Timing Filter — a V6 Profitability Upgrade. It examines how many seconds remain before the market slot closes. The sweet spot lies between 75 and 20 seconds before close. Trades outside this window are permitted only if edge exceeds a configurable strong-edge override threshold. This alone eliminates a great many marginal entries.
 
-5. **Kelly Sizing is invoked.** For trades that pass the oracle, the position size is determined by the Kelly Criterion — a mathematically optimal formula that maximises long-term growth. Half-Kelly is used by default (`KELLY_MULTIPLIER=0.5`) to protect against model error.
+5. **The EV Oracle pronounces judgment.** The Expected Value of each potential trade is calculated. If the edge falls below `MIN_EV` (default 1.0%) or the confidence below `MIN_CONFIDENCE_FILTER` (default 65%), the bot abstains. Abstinence is wisdom.
 
-6. **The Trade is executed on-chain.** The bot constructs, signs, and broadcasts a transaction to the Polymarket CTF Exchange smart contract on Polygon Mainnet (Chain ID 137).
+6. **Kelly Sizing is invoked.** For trades that pass the oracle, the position size is determined by the Kelly Criterion. When Edge-Bucketed Kelly is active (`USE_BUCKETED_KELLY=true`), the Kelly fraction varies with edge strength: conservative on weak signals, aggressive on strong ones. The configurable parameters `KELLY_AVG_WIN_PCT` and `KELLY_AVG_LOSS_PCT` calibrate the sizing to your observed trade statistics.
 
-7. **The Redeemer stands watch.** When markets resolve, the Full Redeemer module scans for all positions where you have won and automatically redeems them — collecting your USDC — even across restarts, even if the bot's internal state was lost.
+7. **The Trade is executed on-chain.** The bot constructs, signs, and broadcasts a transaction to the Polymarket CTF Exchange smart contract on Polygon Mainnet (Chain ID 137).
 
-8. **The PiggyBank receives its tithe.** After each profitable redemption, 1% of the profit is automatically sent to a hardcoded savings wallet. This is the sacred offering.
+8. **The Redeemer stands watch.** When markets resolve, the Full Redeemer module scans for all positions where you have won and automatically redeems them — collecting your USDC — even across restarts, even if the bot's internal state was lost.
+
+9. **The PiggyBank receives its tithe.** If configured, a percentage of each profitable redemption is automatically transferred to your designated savings wallet. Disabled by default — you must consciously activate it.
 
 ---
 
@@ -202,7 +210,7 @@ These control the minimum quality bar for any trade to be placed.
 
 ### 4.4 Position Sizing — Kelly Criterion
 
-The bot uses the Kelly Criterion to size positions. Full Kelly is mathematically optimal for expected log-wealth growth, but is aggressive. Half-Kelly (`KELLY_MULTIPLIER=0.5`) is used by default.
+The bot uses the Kelly Criterion to size positions. Full Kelly is mathematically optimal for expected log-wealth growth, but is aggressive. Half-Kelly (`KELLY_MULTIPLIER=0.5`) is used by default. The V6 upgrade introduces **Edge-Bucketed Kelly** (see §4.9), which dynamically adjusts the fraction based on signal strength.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -220,7 +228,7 @@ These define which markets the bot will even consider trading.
 | Variable | Default | Description |
 |---|---|---|
 | `UP_DOWN_ONLY` | `true` | When `true`, only 5-minute Up/Down crypto markets are scanned. This is the primary recommended mode. |
-| `TARGET_SYMBOLS` | `BTC,ETH,SOL` | Comma-separated list of crypto symbols to scan. Only markets involving these symbols are considered. |
+| `TARGET_SYMBOLS` | `BTC,ETH,SOL,HYPE` | Comma-separated list of crypto symbols to scan. Only markets involving these symbols are considered. The fourth element, HYPE, is Hyperliquid's native token — a market of considerable occult interest. |
 | `MIN_LIQUIDITY_USD` | `200` | Minimum on-book liquidity in USD. Markets with less than this are ignored — they are too thin to execute cleanly. |
 | `MIN_VOLUME_USD` | `100` | Minimum 24-hour volume in USD. Low-volume markets signal disinterest and are avoided. |
 | `MAX_CONCURRENT_POSITIONS` | `3` | Maximum number of simultaneously open positions. Caps portfolio exposure. |
@@ -252,7 +260,73 @@ The bot's circuit breakers. These stop trading when things go wrong.
 | `SCAN_INTERVAL_SECONDS` | `12` | How frequently the scanner runs, in seconds. Range: 5–300. Values below 10 risk hitting RPC rate limits. |
 | `POLYGON_RPC_URL` | `https://polygon-rpc.com` | Fallback Polygon RPC endpoint (used only if Alchemy is not configured). |
 
-### 4.8 Full Redeemer (V89)
+### 4.8 Timing Filter & Sweet-Spot Window (V6)
+
+*The most dangerous moment in a five-minute market is not the final second — it is the first two hundred. Enter too early and you are guessing. Enter too late and the transaction will not confirm before resolution. The sweet spot is a narrow band, and this filter enforces it with iron discipline.*
+
+The V6 Timing Filter restricts entries to a configurable window of time before each slot closes. Only trades with extraordinarily strong edge are permitted outside this window.
+
+| Variable | Default | Description |
+|---|---|---|
+| `TIMING_MIN_SECONDS_BEFORE_CLOSE` | `75` | The outer boundary of the sweet spot. Trades are blocked if more than this many seconds remain, unless edge is very strong. |
+| `TIMING_MAX_SECONDS_BEFORE_CLOSE` | `20` | The inner boundary. Trading ceases below this threshold — execution risk is too high. |
+| `TIMING_STRONG_EDGE_OVERRIDE` | `0.045` | Edge percentage (4.5%) above which the timing filter is bypassed. A signal this powerful may enter at any time. |
+
+**How it works:** For each candidate market, the scanner parses the slot timestamp from the market slug (e.g. `btc-updown-5m-1743000000`) and computes how many seconds remain. If the current time is outside `[TIMING_MAX, TIMING_MIN]`, the trade is skipped — unless edge exceeds `TIMING_STRONG_EDGE_OVERRIDE`.
+
+### 4.9 Edge-Bucketed Kelly (V6)
+
+*A flat Kelly multiplier treats a 52% confidence signal identically to a 78% confidence signal. This is an affront to mathematics. The Bucketed Kelly system corrects this heresy.*
+
+When `USE_BUCKETED_KELLY=true`, the Kelly fraction is drawn from a graduated table keyed to edge strength:
+
+| Edge Bucket | Kelly Fraction | Philosophy |
+|---|---|---|
+| Very weak (< 1.5%) | 0.15× | Near-abstention. The oracle speaks in whispers. |
+| Weak (1.5–3%) | 0.25× | Conservative participation. |
+| Moderate (3–5%) | 0.40× | Standard half-Kelly territory. |
+| Strong (5–7%) | 0.60× | Confident conviction. |
+| Very strong (> 7%) | 0.75× | Maximum permitted aggression. |
+
+The Kelly parameters themselves are now **configurable via environment variable** rather than hardcoded, so you may calibrate them to your own observed trade results:
+
+| Variable | Default | Description |
+|---|---|---|
+| `USE_BUCKETED_KELLY` | `true` | Enable edge-bucketed position sizing. When `false`, falls back to flat `KELLY_MULTIPLIER`. |
+| `KELLY_AVG_WIN_PCT` | `0.07` | Your observed average win size as a fraction (0.07 = 7%). Calibrate this from your trade journal. |
+| `KELLY_AVG_LOSS_PCT` | `0.04` | Your observed average loss size as a fraction (0.04 = 4%). Calibrate this from your trade journal. |
+
+### 4.10 PiggyBank Configuration (V92)
+
+*The V92 Security Patch transforms the PiggyBank from a silent tax into a consciously chosen covenant. The tithe is now yours to configure, direct, and enable — or not.*
+
+In versions prior to V92, the PiggyBank transferred 1% of profits to a hardcoded address and could not be disabled. This was, in retrospect, an act of spiritual imposition. V92 corrects this: the savings wallet, percentage, and enabled state are now fully configurable. By default, all three safeguards are disarmed — nothing moves until you deliberately set them.
+
+| Variable | Default | Description |
+|---|---|---|
+| `PIGGYBANK_ENABLED` | `false` | Master switch. Nothing is transferred unless this is `true`. |
+| `PIGGYBANK_WALLET` | `""` | Your designated savings wallet address. Must be a valid Polygon address (e.g. `0xABC...`). The bot will refuse to transfer if this is empty. |
+| `PIGGYBANK_PCT` | `0.01` | Fraction of each realised profit to transfer. `0.01` = 1%. `0.05` = 5%. Set to `0.0` to effectively disable transfers even if `PIGGYBANK_ENABLED=true`. |
+
+**Safety:** No transfer occurs unless all three conditions are met simultaneously: `PIGGYBANK_ENABLED=true`, `PIGGYBANK_WALLET` is a non-empty address, and `PIGGYBANK_PCT > 0`. The transfer is fire-and-forget — it occurs *after* trade confirmation and never interferes with the trading flow.
+
+### 4.11 Hyperliquid Engine
+
+*The Binance WebSocket feeds the left eye. The Hyperliquid WebSocket feeds the right. With both eyes open, the bot perceives depth that neither could see alone.*
+
+The Hyperliquid Engine (`src/polybot/hyperliquid_engine.py`) connects to `wss://api.hyperliquid.xyz/ws` and derives three categories of signal:
+
+1. **Trade Flow** — Accumulates buy and sell volume in rolling 10-second windows. When $500K+ flows in one direction in ten seconds, it constitutes a Big Flow event (`confidence: 0.78`).
+2. **Order Flow Imbalance (OFI)** — Monitors L2 bid/ask depth. A ratio above 1.3 signals strong buying pressure; below 0.7 signals strong selling pressure.
+3. **Latency Arbitrage** — Detects when Hyperliquid's perpetual mid-price has diverged ≥ 0.30% from Polymarket's implied probability, signalling a likely imminent correction.
+
+Supported assets: `BTC`, `ETH`, `SOL`, `XRP`, `HYPE`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `HYPERLIQUID_ENABLED` | `false` | Start the Hyperliquid engine at boot. Also activates automatically when `HYPE 45` mode is selected. |
+
+### 4.12 Full Redeemer (V89)
 
 The Full Redeemer is an independent background daemon that scans the blockchain for all positions that have resolved in your favour, and redeems them automatically. It operates independently of the main trading loop and survives restarts.
 
@@ -270,7 +344,7 @@ POST /api/force_full_redeem
 GET  /api/full_redeemer_status
 ```
 
-### 4.9 Backtesting & Hyperparameter Optimisation
+### 4.13 Backtesting & Hyperparameter Optimisation
 
 | Variable | Default | Description |
 |---|---|---|
@@ -290,7 +364,7 @@ GET  /api/full_redeemer_status
 | `AUTO_APPLY_BEST` | `true` | Automatically apply the best-found parameters after optimisation completes. |
 | `VIZ_DIR` | `/app/static/optuna_viz` | Directory for optimisation visualisation output files. |
 
-### 4.10 Copy Trading & Whale Tracking
+### 4.14 Copy Trading & Whale Tracking
 
 PolyBot can shadow the positions of known profitable traders ("whales") on Polymarket.
 
@@ -303,7 +377,7 @@ PolyBot can shadow the positions of known profitable traders ("whales") on Polym
 
 The `MODE=copy` activates full copy trading mode. The whale tracker additionally queries the Gamma API to identify top-performing wallets automatically.
 
-### 4.11 The Volatility Schedule
+### 4.15 The Volatility Schedule
 
 *The market breathes. It contracts and expands in rhythms aligned with the opening of the great exchanges. Those who understand these rhythms trade in harmony with them.*
 
@@ -324,7 +398,7 @@ The Volatility Schedule tracks known high-volatility windows and adjusts trading
 
 Enable with `VOLATILITY_SCHEDULE=true`.
 
-### 4.12 Proxy Settings (Geo-Bypass)
+### 4.16 Proxy Settings (Geo-Bypass)
 
 Polymarket is geo-restricted in certain jurisdictions. The bot supports SOCKS5 proxies and proxy rotation.
 
@@ -336,7 +410,7 @@ Polymarket is geo-restricted in certain jurisdictions. The bot supports SOCKS5 p
 | `SOCKS5_PROXY_PASS` | `""` | SOCKS5 proxy password. Treated as a secret. |
 | `PROXY_POOL` | `""` | Comma-separated list of proxy URLs for rotation. |
 
-### 4.13 Dashboard Authentication
+### 4.17 Dashboard Authentication
 
 | Variable | Default | Description |
 |---|---|---|
@@ -344,13 +418,17 @@ Polymarket is geo-restricted in certain jurisdictions. The bot supports SOCKS5 p
 
 ---
 
-## 5. Operating Modes — The Eight Schools of Thought
+## 5. Operating Modes — The Fourteen Schools of Thought
 
-The `MODE` environment variable selects the operating mode. There are eight modes, each a different school of occult market practice.
+*Where once there were eight blunt instruments, now there are fourteen scalpels. The `MODE` environment variable selects the base operating loop. But the true power lies in the Mode Selector dashboard (`/modes`), which resolves each UI mode into a full `StrategyConfig` — specifying not merely what loop to run, but which direction to trade, which signal sources to consult, what timing windows to enforce, and how aggressively to size. This is the grimoire of grimoires.*
+
+### 5.1 Base Modes (set via `MODE` environment variable)
+
+The `MODE` environment variable selects the operating mode's backend loop. There are eight fundamental modes:
 
 | Mode | Description |
 |---|---|
-| `updown` | **Primary Mode.** Scans and trades 5-minute Up/Down crypto markets on BTC, ETH, and SOL. This is the mode for which all other systems were built. |
+| `updown` | **Primary Mode.** Scans and trades 5-minute Up/Down crypto markets on BTC, ETH, SOL, and HYPE. This is the mode for which all other systems were built. |
 | `signal` | Signal-based trading on general Polymarket prediction markets using the full signal engine. Broader market scope than `updown`. |
 | `copy` | Copy trading mode. Mirrors the on-chain positions of designated whale addresses. |
 | `arbitrage` | Arbitrage scanning mode. Identifies price discrepancies between correlated markets and exploits them. |
@@ -359,9 +437,49 @@ The `MODE` environment variable selects the operating mode. There are eight mode
 | `backtest` | Backtesting mode. No live trades are placed. The bot replays historical data and reports performance metrics. |
 | `hyperopt` | Hyperparameter optimisation mode. Uses Optuna to search for optimal configuration parameters via Bayesian optimisation. |
 
+### 5.2 Strategy Profiles — The Fourteen Grimoires
+
+These are the fine-grained strategy profiles selectable from the Mode Selector UI (`/modes`) or via `POST /api/mode`. Each resolves into a complete `StrategyConfig` (`src/polybot/mode_strategies.py`) that overrides timing, direction, signal sources, and risk parameters:
+
+| UI Mode | Label | Base Loop | Description |
+|---|---|---|---|
+| `sniper45` | Sniper 45 | sniper | Last 45 seconds of each slot. Sweet spot: 70–85¢ implied prices. Single Binance signal source. |
+| `sniper30` | Sniper 30 | sniper | Last 30 seconds only. Tighter window, lower minimum confidence (0.58). Maximum urgency. |
+| `sniper60` | Sniper 60 | sniper | Last 60 seconds. Wider window, higher minimum confidence (0.65). More selective entries. |
+| `hype45` | HYPE 45 | sniper | Last 45 seconds with Hyperliquid engine active. Trades BTC, ETH, SOL, XRP, HYPE. Both Binance and Hyperliquid signals consulted. |
+| `demonscalp` | DemonScalp | sniper | Last 30 seconds. Low minimum confidence (0.55). Hyperliquid active. Consensus *not* required. Small Kelly multiplier (0.3×). Maximum aggression, maximum risk. |
+| `coinbase` | Coinbase | signal | Signal-only mode using Binance. Minimum confidence 0.62. Trades during US market hours only (14:00–22:00 UTC). |
+| `full_consensus` | Full Consensus | signal | Requires both Binance AND Hyperliquid to agree before any entry. Conservative (min confidence 0.70). High-conviction trades only. |
+| `down_only` | Down Only | updown | Standard updown loop but restricted to DOWN side only. Useful in bearish regimes. |
+| `updown` | Up/Down | updown | Standard full updown mode. Both directions. Default strategy. |
+| `arbitrage` | Arbitrage | arbitrage | Arbitrage scanner. No directional bias. |
+| `signal` | Signals | signal | Full signal engine across general markets. Minimum confidence 0.60. |
+| `signal247` | Sig 24/7 | signal | Signal mode running continuously with no hour restrictions. Does not skip low-volatility periods. |
+| `autopred` | AutoPred | signal | High-confidence signal mode (min 0.72). Kelly multiplier 0.6×. Trades UP side only. Auto-prediction filtering. |
+| `reverse` | Reverse | signal | Contrarian mode. Fades the crowd: bets DOWN when signals say UP, bets UP when signals say DOWN. For use when the market is known to be wrong. |
+
 ---
 
-## 6. The Decision Engine — How Trades Are Summoned
+## 6. The Mode Selector — Switching Grimoires at Runtime
+
+*The ancients were forced to restart their rituals from the beginning whenever they wished to change their approach. You are not so limited.*
+
+The Mode Selector (`static/modes.html`) is a full-screen web UI served at `/modes`. It presents all fourteen strategy grimoires as selectable cards, each showing its label, description, and active indicator. Clicking a card sends a `POST /api/mode` request and switches the bot's operating strategy **immediately, without restart**.
+
+**Access:** `http://localhost:8080/modes` (or your Railway deployment URL + `/modes`)
+
+**API:**
+
+```
+GET  /api/mode          → Returns current active mode and sub-config
+POST /api/mode          → Switches mode (body: {"ui_mode": "hype45", "mode": "sniper", "snipe_window": 45})
+```
+
+The current mode persists in memory until the bot is restarted (at which point `MODE` from `.env` takes effect again). For permanent changes, update `MODE` in your environment file.
+
+---
+
+## 7. The Decision Engine — How Trades Are Summoned
 
 The heart of PolyBot is the **Edge Engine** (`src/polybot/edge_engine.py`), which consults the **Signal Engine** (`src/polybot/signal_engine.py`). Here is the precise incantation sequence:
 
@@ -397,8 +515,8 @@ EV = (P_win × avg_win_pct) - (P_lose × avg_loss_pct)
 
 Where:
 - `P_win` is the bot's estimated win probability (from signal confidence)
-- `avg_win_pct = 0.07` (7% average win, hardcoded)
-- `avg_loss_pct = 0.04` (4% average loss, hardcoded)
+- `avg_win_pct` = `KELLY_AVG_WIN_PCT` (default 7%) — configurable from your trade history
+- `avg_loss_pct` = `KELLY_AVG_LOSS_PCT` (default 4%) — configurable from your trade history
 
 If `EV < MIN_EV`, the trade is rejected.
 
@@ -410,6 +528,8 @@ Kelly% = (P_win / avg_loss_pct) - (P_lose / avg_win_pct)
 Kelly_USD = Kelly% × KELLY_MULTIPLIER × balance
 Kelly_USD = clamp(Kelly_USD, MIN_TRADE_USD, MAX_POSITION_USD)
 ```
+
+When `USE_BUCKETED_KELLY=true` (the default), the effective multiplier is drawn from the bucketed table described in §4.9 rather than the flat `KELLY_MULTIPLIER`. The two approaches are mutually exclusive — bucketed Kelly supersedes flat Kelly when enabled.
 
 ### Step 6 — Risk Checks
 Before execution, the Risk Manager (`src/polybot/risk_manager.py`) verifies:
@@ -424,7 +544,45 @@ If all checks pass, the On-Chain Executor (`src/polybot/onchain_executor.py`) co
 
 ---
 
-## 7. The Full Redeemer — Harvesting the Fruits of Victory
+## 8. The Hyperliquid Engine — The Second Eye of Providence
+
+*In all great traditions of divination, it is known that a single oracle may be deceived, but two independent oracles agreeing constitutes a vision of uncommon clarity. The Hyperliquid Engine is the second oracle.*
+
+The Hyperliquid Engine (`src/polybot/hyperliquid_engine.py`) connects to the Hyperliquid decentralised perpetuals exchange via WebSocket and processes three signal categories:
+
+### 8.1 Trade Flow Analysis
+
+Hyperliquid streams every trade in real time. The engine accumulates buy and sell volume in 10-second rolling windows. When the net directional flow exceeds $500,000 USD in a single window, it classifies the event as a **Big Flow** signal with 78% confidence. This level of urgency correlates with significant short-term price continuation.
+
+### 8.2 Order Flow Imbalance (OFI)
+
+The engine subscribes to Level-2 order book snapshots. At each update, it computes:
+
+```
+OFI = total_bid_size / total_ask_size
+```
+
+- OFI > 1.3 → Strong buy pressure (confidence: 65%)
+- OFI > 0.7 but < 1.3 → Weak buy pressure (confidence: 55%)
+- OFI < 0.7 → Sell pressure (confidence: 65%)
+
+Hyperliquid's thresholds are deliberately calibrated lower than Binance's (1.5 / 0.8) to account for the exchange's lower absolute liquidity.
+
+### 8.3 Latency Arbitrage
+
+The engine continuously monitors the spread between Hyperliquid's perpetual mid-price and Polymarket's implied probability. When the gap exceeds **0.30%** (and the Polymarket price is in the 43–57¢ range — neither extreme), it generates a latency arb signal (confidence: 68%). The logic: Hyperliquid is a faster, more liquid market. Its price is likely to be correct, and Polymarket will follow.
+
+### 8.4 Signal Integration
+
+When `HYPERLIQUID_ENABLED=true` or the active strategy profile includes `use_hyperliquid=True`, the Hyperliquid signal is combined with the Binance signal. The integration mode depends on the strategy:
+- **Standard** — Either source confirming the direction is sufficient
+- **Consensus required** (`signal_consensus_required=True`) — Both sources must agree, or the trade is blocked
+
+Monitor engine status: `GET /api/hype_status`
+
+---
+
+## 9. The Full Redeemer — Harvesting the Fruits of Victory
 
 *A victory uncollected is a victory surrendered.*
 
@@ -446,24 +604,26 @@ curl -X POST http://localhost:8080/api/force_full_redeem
 
 ---
 
-## 8. The PiggyBank — Sacred Tithing to the Savings Altar
+## 10. The PiggyBank — Sacred Tithing to the Savings Altar
 
-*Every tradition of wealth recognises the importance of setting aside a portion of gain before it can be spent. This is not superstition — it is discipline made automatic.*
+*Every tradition of wealth recognises the importance of setting aside a portion of gain before it can be spent. This is not superstition — it is discipline made automatic. But in V92, it is your discipline, your wallet, your percentage — not mine.*
 
-The PiggyBank (`src/polybot/piggybank.py`) automatically transfers **1% of all realised profits** to a hardcoded savings wallet address after every successful redemption.
+The PiggyBank (`src/polybot/piggybank.py`) automatically transfers a configurable percentage of realised profits to a savings wallet address after every successful redemption.
+
+**V92 Change:** The PiggyBank is now fully opt-in. The savings wallet is no longer hardcoded. You specify your own wallet, your own percentage, and deliberately enable the feature. By default, nothing is transferred to anyone.
 
 **Mechanics:**
 - Minimum profit to trigger: $0.10 (to avoid trivial dust transfers)
 - Minimum transfer amount: $0.05 USDC
-- Transfer is sent as USDC on Polygon
-- The savings wallet address is hardcoded: `0x978982EB8A854e53DD154a0dc89ecb4d54f11FBf`
+- Transfer is sent as USDC on Polygon to your configured `PIGGYBANK_WALLET`
 - Transfer happens *after* trade confirmation and never interferes with the trading flow
+- All three conditions must be met: `PIGGYBANK_ENABLED=true`, `PIGGYBANK_WALLET` is non-empty, `PIGGYBANK_PCT > 0`
 
-This cannot be disabled at runtime — it is baked into the redemption flow. If you object to it, you must fork the code and remove the reference.
+To enable: set `PIGGYBANK_ENABLED=true`, `PIGGYBANK_WALLET=0xYourSavingsAddress`, and `PIGGYBANK_PCT=0.01` (1%) in your environment.
 
 ---
 
-## 9. The Dashboard — Watching the Stars Move
+## 11. The Dashboard — Watching the Stars Move
 
 PolyBot runs a web dashboard on port `8080`. This is your window into the machine.
 
@@ -473,8 +633,7 @@ PolyBot runs a web dashboard on port `8080`. This is your window into the machin
 
 **Dashboard Pages:**
 
-| URL | Description |
-|---|---|
+| `/modes` | Mode Selector UI — visual interface to switch between all fourteen strategy grimoires |
 | `/` or `/dashboard` | Main dashboard showing live P&L, position status, risk metrics, and recent activity |
 | `/api/health` | Health check endpoint. Returns `{"status": "ok"}` if the bot is running. |
 | `/api/pnl` | Current P&L summary: total profit/loss, win rate, number of trades |
@@ -487,6 +646,8 @@ PolyBot runs a web dashboard on port `8080`. This is your window into the machin
 | `/api/rpc_health` | Detailed RPC health check |
 | `/api/allowance_status` | Current USDC allowance on Polymarket contracts |
 | `/api/full_redeemer_status` | Full Redeemer state: last run, positions found, amounts redeemed |
+| `/api/mode` | Current active strategy mode and sub-configuration |
+| `/api/hype_status` | Hyperliquid engine status: prices, trade counts, signals per asset |
 | `/api/backtest-report` | Latest backtest results |
 | `/api/strategy-comparison` | Comparison of strategy variants from backtesting |
 | `/api/production-status` | Production readiness indicators |
@@ -495,19 +656,22 @@ PolyBot runs a web dashboard on port `8080`. This is your window into the machin
 
 ---
 
-## 10. API Reference — The Sacred Endpoints
+## 12. API Reference — The Sacred Endpoints
 
 In addition to the GET endpoints listed in the Dashboard section, the following POST endpoints are available:
 
 | Method | Endpoint | Description |
 |---|---|---|
+| `GET` | `/api/mode` | Returns current active strategy mode and sub-configuration |
+| `POST` | `/api/mode` | Switch strategy at runtime. Body: `{"ui_mode": "hype45", "mode": "sniper", "snipe_window": 45}` |
+| `GET` | `/api/hype_status` | Hyperliquid engine status — prices, OFI, signals, trade counts per asset |
 | `POST` | `/api/force_full_redeem` | Immediately triggers a full redemption scan, regardless of interval schedule |
 | `POST` | `/apply-best-params` | Applies the best hyperparameters found by the most recent Optuna optimisation run |
 | `POST` | `/api/trigger-backup` | Triggers a manual backup of the database and state files |
 
 ---
 
-## 11. The Volatility Schedule — Trading in Harmony with the Cosmic Clock
+## 13. The Volatility Schedule — Trading in Harmony with the Cosmic Clock
 
 *The uninitiated trader enters the market at random hours, wondering why fortune does not favour them. The adept knows: the market breathes according to the clock of human institutions.*
 
@@ -531,7 +695,7 @@ This feature combines beautifully with the Volatility Regime detector (`src/poly
 
 ---
 
-## 12. Backtesting — Consulting the Ancestors
+## 14. Backtesting — Consulting the Ancestors
 
 *Before committing capital to any strategy, the prudent student tests it against the record of history.*
 
@@ -555,7 +719,7 @@ python -m polybot backtest
 
 ---
 
-## 13. Hyperparameter Optimisation — Seeking the Perfect Proportion
+## 15. Hyperparameter Optimisation — Seeking the Perfect Proportion
 
 *The parameters you set are not the optimal parameters. They are merely the starting point. Let the machine find the truth.*
 
@@ -590,7 +754,7 @@ Visualisations of the optimisation landscape are written to `VIZ_DIR` (default `
 
 ---
 
-## 14. Deployment on Railway — The Cloud Temple
+## 16. Deployment on Railway — The Cloud Temple
 
 Railway is the recommended deployment platform. It provides persistent environment variables, automatic deploys from GitHub, and a URL for your dashboard.
 
@@ -648,7 +812,7 @@ The `Dockerfile` uses a multi-stage build optimised for production. The image is
 
 ---
 
-## 15. Running Locally — The Private Laboratory
+## 17. Running Locally — The Private Laboratory
 
 *Before unleashing anything upon the world, the adept experiments in their private laboratory.*
 
@@ -675,7 +839,7 @@ The dashboard will be available at `http://localhost:8080`.
 
 ---
 
-## 16. The Test Suite — Proving the Formulas
+## 18. The Test Suite — Proving the Formulas
 
 *An untested formula is a prayer. A tested formula is a law.*
 
@@ -725,12 +889,14 @@ pytest tests/test_credentials_manager.py -v
 | `test_terminal_logger.py` | Terminal output formatting |
 | `test_updown_crypto.py` | Up/Down crypto market specific logic |
 | `test_auth_and_persistence.py` | Dashboard authentication and state persistence |
+| `test_mode_strategies.py` | Strategy profile resolution, direction filtering, and mode selector logic |
+| `test_timing_and_kelly.py` | V6 Timing Filter sweet-spot enforcement and Edge-Bucketed Kelly sizing |
 
 CI runs automatically on every push via GitHub Actions (`.github/workflows/ci.yml`).
 
 ---
 
-## 17. Security Architecture — The Wards and Seals
+## 19. Security Architecture — The Wards and Seals
 
 *The occultist who leaves their grimoire unguarded invites disaster. The trader who leaves their private key exposed invites ruin. These are equivalent catastrophes.*
 
@@ -763,7 +929,7 @@ The private key is accepted with or without the `0x` prefix and is validated on 
 
 ---
 
-## 18. Database — The Akashic Record
+## 20. Database — The Akashic Record
 
 *All that occurs is recorded. The Akashic Record forgets nothing.*
 
@@ -789,7 +955,7 @@ Creates a timestamped backup of the database in a `backups/` directory.
 
 ---
 
-## 19. The Solana Bridge — Crossing the Dimensional Threshold
+## 21. The Solana Bridge — Crossing the Dimensional Threshold
 
 *For those who hold capital across multiple chains, the bridge is the passage between worlds.*
 
@@ -814,7 +980,7 @@ The Solana Bridge (`src/polybot/solana_bridge.py`) is an optional feature that a
 
 ---
 
-## 20. Troubleshooting — Exorcising the Demons
+## 22. Troubleshooting — Exorcising the Demons
 
 *When the ritual fails, do not despair. Consult the symptom, identify the cause, apply the remedy.*
 
@@ -883,7 +1049,7 @@ Or set `auto_approve_enabled=true` (the default). The bot will approve at startu
 
 ---
 
-## 21. Migration — The Grand Migration Ritual
+## 23. Migration — The Grand Migration Ritual
 
 If you are migrating from an older version of PolyBot (v1 or v2), consult `MIGRATION.md` for the full procedure. The helper script automates most of the migration:
 
@@ -900,17 +1066,39 @@ bash migrate_to_polybot2.sh
 
 ---
 
-## 22. Feature Compendium
+## 24. Feature Compendium
 
 A complete list of all implemented features:
 
 **Core Trading**
-- ✅ 5-minute Up/Down crypto market trading (BTC, ETH, SOL)
+- ✅ 5-minute Up/Down crypto market trading (BTC, ETH, SOL, HYPE)
 - ✅ Multi-factor signal engine (MA, RSI, MACD, Momentum, Volume)
 - ✅ Kelly Criterion position sizing (half-Kelly default)
+- ✅ Edge-Bucketed Kelly (V6): adaptive sizing by signal strength
+- ✅ Configurable Kelly win/loss parameters (`KELLY_AVG_WIN_PCT`, `KELLY_AVG_LOSS_PCT`)
 - ✅ Expected Value filtering
 - ✅ On-chain order execution via Polymarket CLOB API
 - ✅ EIP-712 signed order construction
+
+**Signal Sources**
+- ✅ Binance WebSocket — primary signal source (MA, RSI, MACD, Momentum, Volume)
+- ✅ Hyperliquid WebSocket engine — trade flow, OFI, latency arb signals (BTC, ETH, SOL, XRP, HYPE)
+- ✅ Dual-source consensus mode (both sources must agree before entry)
+
+**Timing & Filtering**
+- ✅ V6 Timing Filter: sweet-spot window enforcement (75–20 seconds before close)
+- ✅ Configurable strong-edge override for early entries
+- ✅ Volatility Schedule (time-aware trading intensity)
+- ✅ Volatility Regime detection (ATR-based)
+- ✅ Hourly risk regime classification
+
+**Strategy System**
+- ✅ 14 named strategy profiles (`src/polybot/mode_strategies.py`)
+- ✅ Mode Selector web UI (`/modes`) — switch strategies at runtime without restart
+- ✅ Runtime mode switching via `POST /api/mode`
+- ✅ Direction filter (up-only, down-only, both)
+- ✅ Per-strategy Kelly overrides, confidence thresholds, asset lists, active hours
+- ✅ Reverse/contrarian mode (fades the crowd)
 
 **Risk Management**
 - ✅ Daily loss circuit breaker
@@ -928,9 +1116,6 @@ A complete list of all implemented features:
 
 **Automation & Scheduling**
 - ✅ Configurable scan interval (5–300 seconds)
-- ✅ Volatility Schedule (time-aware trading intensity)
-- ✅ Volatility Regime detection (ATR-based)
-- ✅ Hourly risk regime classification
 - ✅ Compounding mode (reinvests profits)
 
 **Analytics & Optimisation**
@@ -944,7 +1129,7 @@ A complete list of all implemented features:
 - ✅ Copy trading / whale tracking
 - ✅ Gamma API integration for top trader discovery
 - ✅ Arbitrage scanner
-- ✅ Sniper mode
+- ✅ Sniper mode (last N seconds before slot close)
 - ✅ Adaptive position scaling
 
 **Infrastructure**
@@ -955,7 +1140,7 @@ A complete list of all implemented features:
 - ✅ SOCKS5 proxy support with rotation
 - ✅ USDC auto-approval
 - ✅ Solana bridge for auto-funding
-- ✅ PiggyBank auto-savings (1% of profits)
+- ✅ PiggyBank auto-savings (configurable wallet, percentage, enable/disable — V92)
 - ✅ Terminal logger with coloured output
 - ✅ Dashboard authentication (HTTP Basic Auth)
 - ✅ Rate limiting and security headers
@@ -968,10 +1153,13 @@ A complete list of all implemented features:
 
 ---
 
-## 23. Version Chronicle
+## 25. Version Chronicle
 
 | Version | Highlights |
 |---|---|
+| V92 | PiggyBank made fully configurable. `PIGGYBANK_ENABLED`, `PIGGYBANK_WALLET`, `PIGGYBANK_PCT` now env-controlled. No hardcoded addresses. Disabled by default. |
+| V6 (Profitability Upgrade) | Timing Filter (`TIMING_MIN/MAX_SECONDS_BEFORE_CLOSE`). Edge-Bucketed Kelly (`USE_BUCKETED_KELLY`). Configurable Kelly parameters (`KELLY_AVG_WIN_PCT`, `KELLY_AVG_LOSS_PCT`). |
+| V5 (Strategy System) | `mode_strategies.py`: 14 named strategy profiles. Mode Selector UI (`/modes`). Runtime mode switching via API. Hyperliquid Engine (`hyperliquid_engine.py`): trade flow, OFI, latency arb. HYPE added to target symbols. |
 | V91 | Security fix: credentials never cached to disk. `CREDS_FILE=None`. |
 | V90 | `STARTUP_REDEEM_ALL` feature: comprehensive position sweep on every restart. |
 | V89 | Full Redeemer introduced: independent background redemption daemon. |

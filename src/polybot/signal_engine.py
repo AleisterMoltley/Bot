@@ -25,7 +25,7 @@ from polybot.logging_setup import get_logger
 log = get_logger(__name__)
 
 # Supported assets
-ASSETS = ["BTC", "ETH", "SOL", "XRP"]
+ASSETS = ["BTC", "ETH", "SOL", "XRP", "HYPE"]
 
 # Binance symbol mapping
 BINANCE_SYMBOLS = {
@@ -33,6 +33,7 @@ BINANCE_SYMBOLS = {
     "ETH": "ethusdt",
     "SOL": "solusdt",
     "XRP": "xrpusdt",
+    "HYPE": "hypeusdt",
 }
 
 # Signal thresholds

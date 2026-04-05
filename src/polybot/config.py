@@ -124,7 +124,7 @@ SCANNER_DEFAULTS = {
     "min_deviation_pct": 12.0,
     "top_count": 8,
     "prioritize_politics": True,
-    "target_symbols": ["BTC", "ETH", "SOL"],
+    "target_symbols": ["BTC", "ETH", "SOL", "HYPE"],
 }
 
 # Fee Configuration (Polymarket fees - rarely change)
@@ -242,6 +242,25 @@ class Settings(BaseSettings):
         le=1.0,
         description="Kelly fraction multiplier: 0.5=Half-Kelly (safer), 1.0=Full-Kelly (aggressive)",
         alias="KELLY_MULTIPLIER",
+    )
+    kelly_avg_win_pct_val: float = Field(
+        default=0.07,
+        ge=0.01,
+        le=0.5,
+        description="Average win size for Kelly EV calc (0.07 = 7%)",
+        alias="KELLY_AVG_WIN_PCT",
+    )
+    kelly_avg_loss_pct_val: float = Field(
+        default=0.04,
+        ge=0.01,
+        le=0.5,
+        description="Average loss size for Kelly EV calc (0.04 = 4%)",
+        alias="KELLY_AVG_LOSS_PCT",
+    )
+    use_bucketed_kelly: bool = Field(
+        default=True,
+        description="Use edge-bucketed Kelly (conservative on weak edges, aggressive on strong)",
+        alias="USE_BUCKETED_KELLY",
     )
     max_position_usd: float = Field(
         default=50.0,
@@ -488,6 +507,28 @@ class Settings(BaseSettings):
         ge=5,
         le=300,
     )
+    # ── Timing Filter (V6 Profitability Upgrade) ─────────────────────
+    timing_min_seconds_before_close: int = Field(
+        default=75,
+        description="Only trade in last N seconds of slot (sweet spot window)",
+        ge=20,
+        le=240,
+        alias="TIMING_MIN_SECONDS_BEFORE_CLOSE",
+    )
+    timing_max_seconds_before_close: int = Field(
+        default=20,
+        description="Don't trade with less than N seconds left (execution risk)",
+        ge=5,
+        le=60,
+        alias="TIMING_MAX_SECONDS_BEFORE_CLOSE",
+    )
+    timing_strong_edge_override: float = Field(
+        default=0.045,
+        description="Edge threshold to trade outside sweet spot window",
+        ge=0.01,
+        le=0.20,
+        alias="TIMING_STRONG_EDGE_OVERRIDE",
+    )
     min_confidence: int = Field(
         default=68,
         description="Minimum signal confidence to trade (0-100)",
@@ -598,7 +639,7 @@ class Settings(BaseSettings):
 
     # ── Target Markets ─────────────────────────────────────────────
     target_symbols: list[str] = Field(
-        default=["BTC", "ETH", "SOL"],
+        default=["BTC", "ETH", "SOL", "HYPE"],
         description="Only scan these symbols for 5min Up/Down markets",
     )
 
@@ -679,6 +720,32 @@ class Settings(BaseSettings):
             "Catches positions the bot lost track of after restart or state loss."
         ),
         alias="STARTUP_REDEEM_ALL",
+    )
+
+    # ── V92: PiggyBank (configurable, disabled by default) ────────────
+    piggybank_enabled: bool = Field(
+        default=False,
+        description="Enable auto-savings of profit percentage to savings wallet",
+        alias="PIGGYBANK_ENABLED",
+    )
+    piggybank_wallet: str = Field(
+        default="",
+        description="Savings wallet address for piggybank transfers",
+        alias="PIGGYBANK_WALLET",
+    )
+    piggybank_pct: float = Field(
+        default=0.0,
+        description="Fraction of profit to save (0.01 = 1%)",
+        ge=0.0,
+        le=0.5,
+        alias="PIGGYBANK_PCT",
+    )
+
+    # ── Hyperliquid Engine ────────────────────────────────────────────
+    hyperliquid_enabled: bool = Field(
+        default=False,
+        description="Enable Hyperliquid WebSocket engine for additional signals",
+        alias="HYPERLIQUID_ENABLED",
     )
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -826,14 +893,14 @@ class Settings(BaseSettings):
     def pnl_tracking_enabled(self) -> bool:
         return True
 
-    # Kelly defaults (hardcoded)
+    # Kelly defaults (configurable via env)
     @property
     def kelly_avg_win_pct(self) -> float:
-        return KELLY_DEFAULTS["avg_win_pct"]
+        return self.kelly_avg_win_pct_val
 
     @property
     def kelly_avg_loss_pct(self) -> float:
-        return KELLY_DEFAULTS["avg_loss_pct"]
+        return self.kelly_avg_loss_pct_val
 
     @property
     def kelly_max_fraction(self) -> float:

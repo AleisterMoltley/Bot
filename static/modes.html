@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PolyBot — Select Mode</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0a0c10;
+      --card: #12151c;
+      --card-hover: #181c26;
+      --border: #1e2230;
+      --border-active: #c8a831;
+      --text: #e2e4ea;
+      --text-dim: #6b7084;
+      --text-muted: #454860;
+      --accent: #c8a831;
+      --accent-glow: rgba(200, 168, 49, 0.15);
+      --green: #22c55e;
+      --red: #ef4444;
+      --purple: #a855f7;
+      --blue: #3b82f6;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 20px 60px;
+    }
+
+    /* ── Header ── */
+    .header {
+      text-align: center;
+      margin-bottom: 36px;
+    }
+
+    .header h1 {
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+
+    /* ── Grid ── */
+    .mode-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      max-width: 780px;
+      width: 100%;
+    }
+
+    /* ── Mode Card ── */
+    .mode-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 24px 20px 20px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      position: relative;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .mode-card:hover {
+      background: var(--card-hover);
+      border-color: #2a2e40;
+      transform: translateY(-1px);
+    }
+
+    .mode-card.active {
+      border-color: var(--border-active);
+      box-shadow: 0 0 20px var(--accent-glow), inset 0 0 20px var(--accent-glow);
+    }
+
+    .mode-card.active .mode-name {
+      color: var(--accent);
+    }
+
+    /* ── Icon ── */
+    .mode-icon {
+      font-size: 26px;
+      line-height: 1;
+      margin-bottom: 4px;
+      opacity: 0.85;
+      color: var(--text-dim);
+    }
+
+    .mode-card.active .mode-icon {
+      opacity: 1;
+      color: var(--text);
+    }
+
+    /* Special icon colors */
+    .mode-card[data-mode="hype45"] .mode-icon { color: #34d399; }
+    .mode-card[data-mode="demonscalp"] .mode-icon { color: #c084fc; }
+    .mode-card[data-mode="arbitrage"] .mode-icon { color: #fbbf24; }
+
+    /* ── Text ── */
+    .mode-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: 0.5px;
+    }
+
+    .mode-desc {
+      font-size: 10px;
+      font-weight: 400;
+      color: var(--text-dim);
+      letter-spacing: 0.3px;
+    }
+
+    /* ── Active Badge ── */
+    .active-badge {
+      display: none;
+      margin-top: 6px;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      padding: 2px 10px;
+      border-radius: 3px;
+    }
+
+    .mode-card.active .active-badge {
+      display: inline-block;
+    }
+
+    /* ── Loading overlay ── */
+    .loading-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(10, 12, 16, 0.8);
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
+      backdrop-filter: blur(4px);
+    }
+
+    .loading-overlay.show { display: flex; }
+
+    .loading-spinner {
+      width: 32px;
+      height: 32px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--card);
+      border: 1px solid var(--border);
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 12px;
+      color: var(--text);
+      z-index: 200;
+      transition: transform 0.3s ease, opacity 0.3s ease;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+
+    .toast.success { border-color: var(--green); color: var(--green); }
+    .toast.error { border-color: var(--red); color: var(--red); }
+
+    /* ── Back link ── */
+    .back-link {
+      position: fixed;
+      top: 16px;
+      left: 20px;
+      font-size: 11px;
+      color: var(--text-dim);
+      text-decoration: none;
+      letter-spacing: 1px;
+      transition: color 0.2s;
+    }
+    .back-link:hover { color: var(--text); }
+
+    /* ── Responsive ── */
+    @media (max-width: 520px) {
+      .mode-grid { grid-template-columns: 1fr; }
+      body { padding: 60px 12px 40px; }
+    }
+  </style>
+</head>
+<body>
+
+<a href="/dashboard" class="back-link">← DASHBOARD</a>
+
+<div class="header">
+  <h1>Select Mode</h1>
+</div>
+
+<div class="mode-grid" id="modeGrid">
+  <!-- Sniper 45 -->
+  <div class="mode-card" data-mode="sniper45" onclick="selectMode(this)">
+    <div class="mode-icon">⊕</div>
+    <div class="mode-name">Sniper 45</div>
+    <div class="mode-desc">Last 45s, 70-85c sweet spot</div>
+    <div class="active-badge">ACTIVE</div>
+  </div>
+
+  <!-- HYPE 45 -->
+  <div class="mode-card" data-mode="hype45" onclick="selectMode(this)">
+    <div class="mode-icon">🌊</div>
+    <div class="mode-name">HYPE 45</div>
+    <div class="mode-desc">Hyperliquid markets only</div>
+    <div class="active-badge">ACTIVE</div>
+  </div>
+
+  <!-- Sniper 30 -->
+  <div class="mode-card" data-mode="sniper30" onclick="selectMode(this)">
+    <div class="mode-icon">⊕</div>
+    <div class="mode-name">Sniper 30</div>
+    <div class="mode-desc">Last 30s, aggressive</div>
+    <div class="active-badge">ACTIVE</div>
+  </div>
+
+  <!-- Sniper 60 -->
+  <div class="mode-card" data-mode="sniper60" onclick="selectMode(this)">
+    <div class="mode-icon">⊕</div>
+    <div class="mode-name">Sniper 60</div>
+    <div class="mode-desc">Last 60s, wider window</div>
+    <div class="active-badge">ACTIVE</div>
+  </div>
+
+  <!-- DemonScalp -->
+  <div class="mode-card" data-mode="demonscalp" onclick="selectMode(this)">
+    <div class="mode-icon">👿</div>
+    <div class="mode-name">DemonScalp</div>
+    <div class="mode-desc">15m scalps, high conviction</div>
+    <div class="active-badge">ACTIVE</div>
+  </div>
+
+  <!-- Coinbase -->
+  <div class="mode-card" data-mode="coinbase" onclick="selectMode(this)">
+    <div class="mode-icon">◇</div>
+    <div class="mode-name">Coinbase</div>
+    <div class="mode-desc">Macro trend following</div>
+    <div class="active-badge">ACTIVE</div>
+  </div>
+
+  <!-- Full Consensus -->
+  <div class="mode-card" data-mode="full_consensus" onclick="selectMode(this)">
+    <div class="mode-icon">★</div>
+    <div class="mode-name">Full Consensus</div>
+    <div class="mode-desc">All consensus signals</div>
+    <div class="active-badge">ACTIVE</div>
+  </div>
+
+  <!-- Down Only -->
+  <div class="mode-card" data-mode="down_only" onclick="selectMode(this)">
+    <div class="mode-icon">▼</div>
+    <div class="mode-name">Down Only</div>
+    <div class="mode-desc">Bearish consensus hours</div>
+    <div class="active-badge">ACTIVE</div>
+  </div>
+
+  <!-- Up/Down -->
+  <div class="mode-card" data-mode="updown" onclick="selectMode(this)">
+    <div class="mode-icon">↕</div>
+    <div class="mode-name">Up/Down</div>
+    <div class="mode-desc">Both sides by schedule</div>
+    <div class="active-badge">ACTIVE</div>
+  </div>
+
+  <!-- Arbitrage -->
+  <div class="mode-card" data-mode="arbitrage" onclick="selectMode(this)">
+    <div class="mode-icon">⚡</div>
+    <div class="mode-name">Arbitrage</div>
+    <div class="mode-desc">Mispriced market edges</div>
+    <div class="active-badge">ACTIVE</div>
+  </div>
+
+  <!-- Signals -->
+  <div class="mode-card" data-mode="signal" onclick="selectMode(this)">
+    <div class="mode-icon">⚑</div>
+    <div class="mode-name">Signals</div>
+    <div class="mode-desc">Filtered signal trades</div>
+    <div class="active-badge">ACTIVE</div>
+  </div>
+
+  <!-- Sig 24/7 -->
+  <div class="mode-card" data-mode="signal247" onclick="selectMode(this)">
+    <div class="mode-icon">⚑</div>
+    <div class="mode-name">Sig 24/7</div>
+    <div class="mode-desc">Signals around the clock</div>
+    <div class="active-badge">ACTIVE</div>
+  </div>
+
+  <!-- AutoPred -->
+  <div class="mode-card" data-mode="autopred" onclick="selectMode(this)">
+    <div class="mode-icon">⚙</div>
+    <div class="mode-name">AutoPred</div>
+    <div class="mode-desc">Predictive model signals</div>
+    <div class="active-badge">ACTIVE</div>
+  </div>
+
+  <!-- Reverse -->
+  <div class="mode-card" data-mode="reverse" onclick="selectMode(this)">
+    <div class="mode-icon">⇅</div>
+    <div class="mode-name">Reverse</div>
+    <div class="mode-desc">Contrarian consensus</div>
+    <div class="active-badge">ACTIVE</div>
+  </div>
+</div>
+
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="loading-spinner"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  // ── Map UI mode keys → backend mode + sub-config ──
+  const MODE_MAP = {
+    sniper45:       { mode: "sniper", snipe_window: 45, label: "Sniper 45" },
+    sniper30:       { mode: "sniper", snipe_window: 30, label: "Sniper 30" },
+    sniper60:       { mode: "sniper", snipe_window: 60, label: "Sniper 60" },
+    hype45:         { mode: "sniper", snipe_window: 45, sub: "hype", label: "HYPE 45" },
+    demonscalp:     { mode: "sniper", snipe_window: 900, sub: "demonscalp", label: "DemonScalp" },
+    coinbase:       { mode: "signal", sub: "coinbase", label: "Coinbase" },
+    full_consensus: { mode: "signal", sub: "full_consensus", label: "Full Consensus" },
+    down_only:      { mode: "updown", sub: "down_only", label: "Down Only" },
+    updown:         { mode: "updown", label: "Up/Down" },
+    arbitrage:      { mode: "arbitrage", label: "Arbitrage" },
+    signal:         { mode: "signal", label: "Signals" },
+    signal247:      { mode: "signal", sub: "signal247", label: "Sig 24/7" },
+    autopred:       { mode: "signal", sub: "autopred", label: "AutoPred" },
+    reverse:        { mode: "signal", sub: "reverse", label: "Reverse" },
+  };
+
+  let currentMode = null;
+
+  // ── Fetch current mode on load ──
+  async function fetchCurrentMode() {
+    try {
+      const resp = await fetch('/api/mode');
+      if (resp.ok) {
+        const data = await resp.json();
+        currentMode = data.ui_mode || data.mode || 'updown';
+        highlightActive(currentMode);
+      }
+    } catch (e) {
+      // fallback: try /api/status
+      try {
+        const resp2 = await fetch('/api/status');
+        if (resp2.ok) {
+          const data2 = await resp2.json();
+          currentMode = data2.mode || 'updown';
+          highlightActive(currentMode);
+        }
+      } catch (_) {}
+    }
+  }
+
+  function highlightActive(modeKey) {
+    document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('active'));
+    const card = document.querySelector(`[data-mode="${modeKey}"]`);
+    if (card) card.classList.add('active');
+  }
+
+  function showToast(msg, type = 'success') {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'toast show ' + type;
+    setTimeout(() => { t.className = 'toast'; }, 2500);
+  }
+
+  async function selectMode(card) {
+    const modeKey = card.dataset.mode;
+    if (modeKey === currentMode) return;
+
+    const config = MODE_MAP[modeKey];
+    if (!config) return;
+
+    // Optimistic UI
+    highlightActive(modeKey);
+
+    const overlay = document.getElementById('loadingOverlay');
+    overlay.classList.add('show');
+
+    try {
+      const resp = await fetch('/api/mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ui_mode: modeKey, ...config })
+      });
+
+      if (resp.ok) {
+        currentMode = modeKey;
+        showToast(`${config.label} activated`, 'success');
+      } else {
+        const err = await resp.json().catch(() => ({}));
+        showToast(err.detail || 'Failed to switch mode', 'error');
+        highlightActive(currentMode); // revert
+      }
+    } catch (e) {
+      showToast('Network error', 'error');
+      highlightActive(currentMode); // revert
+    } finally {
+      overlay.classList.remove('show');
+    }
+  }
+
+  fetchCurrentMode();
+</script>
+
+</body>
+</html>

@@ -322,3 +322,68 @@ def calculate_kelly_position(
     )
 
     return position_usd
+
+
+def calculate_bucketed_kelly(
+    edge: float,
+    bankroll: float,
+    base_kelly: float = 0.5,
+    max_position: float = 60.0,
+    min_position: float = 5.0,
+) -> float:
+    """Edge-bucketed Kelly — scales sizing based on edge strength.
+
+    Instead of a flat Kelly multiplier, this uses edge buckets to be
+    conservative on weak edges and aggressive on strong ones.
+
+    Edge buckets:
+        < 1.5%  → 0.20× (very conservative — weak edge)
+        1.5–3%  → 0.50× (normal)
+        3–5%    → 0.80× (aggressive — strong edge)
+        > 5%    → 1.10× (very aggressive — rare, capped)
+
+    Args:
+        edge: Trading edge (0.0-1.0 scale, e.g., 0.03 = 3%)
+        bankroll: Current bankroll in USD
+        base_kelly: Base Kelly fraction (default 0.5 = Half-Kelly)
+        max_position: Hard cap per trade in USD
+        min_position: Minimum trade size in USD
+
+    Returns:
+        Position size in USD, capped to [min_position, max_position].
+    """
+    if edge <= 0 or bankroll <= 0:
+        return 0.0
+
+    # Edge bucketing
+    if edge < 0.015:
+        multiplier = 0.20
+    elif edge < 0.030:
+        multiplier = 0.50
+    elif edge < 0.050:
+        multiplier = 0.80
+    else:
+        multiplier = 1.10
+
+    # Kelly formula: f* = edge * 4 (binary outcome, variance = 0.25)
+    BINARY_VARIANCE_RECIPROCAL = 4.0
+    kelly_fraction = edge * BINARY_VARIANCE_RECIPROCAL * multiplier * base_kelly
+
+    # Cap at 25% of bankroll
+    kelly_fraction = min(kelly_fraction, MAX_KELLY_FRACTION)
+
+    position_usd = bankroll * kelly_fraction
+
+    # Hard caps
+    position_usd = min(position_usd, max_position)
+    position_usd = max(position_usd, min_position) if position_usd > 0 else 0.0
+
+    log.debug(
+        "Bucketed Kelly",
+        edge=round(edge, 4),
+        bucket_mult=multiplier,
+        kelly_frac=round(kelly_fraction, 4),
+        position=round(position_usd, 2),
+    )
+
+    return position_usd

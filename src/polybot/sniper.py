@@ -44,13 +44,42 @@ ASSET_PREFIXES = {
     "ETH": "eth-updown-5m-",
     "SOL": "sol-updown-5m-",
     "XRP": "xrp-updown-5m-",
+    "HYPE": "hype-updown-5m-",
 }
 
 GAMMA_API = "https://gamma-api.polymarket.com"
 
 
-def _get_current_slot_times() -> dict[str, dict]:
+def _is_hype_mode() -> bool:
+    """Check if Hyperliquid mode is active (runtime override or env)."""
+    import os
+    if os.environ.get("HYPERLIQUID_ENABLED", "").lower() in ("true", "1", "yes"):
+        return True
+    # Check runtime mode override from main_fastapi
+    try:
+        from polybot.main_fastapi import _runtime_mode_override
+        return _runtime_mode_override.get("sub") == "hype"
+    except (ImportError, AttributeError):
+        return False
+
+
+def _extract_yes_price(market: dict) -> float:
+    """Extract YES/UP price from a Polymarket market dict."""
+    yes_price = 0.5
+    for token in market.get("tokens", []):
+        if token.get("outcome", "").lower() in ("yes", "up"):
+            p = token.get("price")
+            if p is not None:
+                yes_price = float(p)
+                break
+    return yes_price
+
+
+def _get_current_slot_times(snipe_window: int = SNIPE_WINDOW_BEFORE_END) -> dict[str, dict]:
     """Calculate current and next slot start/end for each asset.
+
+    Args:
+        snipe_window: Seconds before slot end to consider "snipe window" open.
 
     Returns dict of asset -> {start, end, slug, seconds_until_snipe, seconds_until_end}
     """
@@ -62,7 +91,7 @@ def _get_current_slot_times() -> dict[str, dict]:
     for asset, prefix in ASSET_PREFIXES.items():
         slot_end = current_slot_start + SLOT_DURATION
         seconds_until_end = slot_end - now
-        seconds_until_snipe = seconds_until_end - SNIPE_WINDOW_BEFORE_END
+        seconds_until_snipe = seconds_until_end - snipe_window
 
         result[asset] = {
             "start": current_slot_start,
@@ -96,8 +125,28 @@ async def _fetch_market_by_slug(slug: str) -> Optional[dict]:
 def _analyze_direction(asset: str, market: dict) -> tuple[str, float]:
     """Analyze which direction will win using SignalEngine + price data.
 
+    Uses Hyperliquid engine when HYPE mode is active, otherwise Binance.
     Returns (direction, confidence) where direction is "up" or "down".
     """
+    # Check if Hyperliquid mode is active (runtime override or env)
+    use_hype = _is_hype_mode()
+
+    if use_hype:
+        from polybot.hyperliquid_engine import get_hyperliquid_engine
+        hype = get_hyperliquid_engine()
+        # Get YES price from market
+        yes_price = _extract_yes_price(market)
+        signal = hype.get_signal(asset, polymarket_up_price=yes_price)
+        if signal.is_valid and signal.confidence >= MIN_CONFIDENCE_TO_SNIPE:
+            log.info(
+                "🎯 SNIPER [HYPE] signal",
+                asset=asset, direction=signal.direction,
+                confidence=f"{signal.confidence:.3f}",
+                reason=signal.reason,
+            )
+            return signal.direction, signal.confidence
+        # Fall through to Binance engine as backup
+
     engine = get_signal_engine()
 
     # Get YES price from market
@@ -269,11 +318,30 @@ async def run_sniper_loop():
     engine = get_signal_engine()
     sniped_slugs: set[str] = set()
 
-    log.info("🎯 SNIPER MODE ACTIVE", targets=targets)
+    # Load active strategy for snipe window / confidence overrides
+    try:
+        from polybot.mode_strategies import get_active_strategy
+        strategy = get_active_strategy()
+        dynamic_window = strategy.snipe_window_seconds
+        dynamic_min_conf = strategy.min_confidence
+        log.info(
+            "🎯 SNIPER MODE ACTIVE (strategy=%s, window=%ds, min_conf=%.2f)",
+            strategy.label, dynamic_window, dynamic_min_conf, targets=targets,
+        )
+    except (ImportError, AttributeError):
+        dynamic_window = SNIPE_WINDOW_BEFORE_END
+        dynamic_min_conf = MIN_CONFIDENCE_TO_SNIPE
+        log.info("🎯 SNIPER MODE ACTIVE", targets=targets)
 
-    # Start signal engine for real-time data
+    # Start signal engine(s) for real-time data
     try:
         await engine.start()
+        # Also start Hyperliquid engine if in HYPE mode
+        if _is_hype_mode():
+            from polybot.hyperliquid_engine import get_hyperliquid_engine
+            hype = get_hyperliquid_engine(assets=targets)
+            await hype.start()
+            log.info("🎯 HYPERLIQUID ENGINE started alongside Binance")
         # Wait for data warmup
         await asyncio.sleep(5)
     except Exception as e:
@@ -293,16 +361,16 @@ async def run_sniper_loop():
                 continue
 
             # Dynamic confidence threshold based on volatility regime
-            effective_min_confidence = MIN_CONFIDENCE_TO_SNIPE
+            effective_min_confidence = dynamic_min_conf
             vol_regime = None
             if vol_enabled:
                 vol_regime = get_current_regime()
                 effective_min_confidence = max(
                     0.50,
-                    MIN_CONFIDENCE_TO_SNIPE + vol_regime.confidence_offset,
+                    dynamic_min_conf + vol_regime.confidence_offset,
                 )
 
-            slots = _get_current_slot_times()
+            slots = _get_current_slot_times(snipe_window=dynamic_window)
 
             for asset in targets:
                 if asset not in slots:

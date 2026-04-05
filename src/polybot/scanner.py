@@ -67,6 +67,59 @@ def is_slot_tradeable(slug: str, buffer_seconds: int = SLOT_BUFFER_SECONDS) -> b
         return False
 
 
+# ── Timing filter: trade only in the optimal window ──────────────────────────
+# Defaults here; overridden by config if available
+MIN_SECONDS_BEFORE_CLOSE = 75
+MAX_SECONDS_BEFORE_CLOSE = 20
+STRONG_EDGE_OVERRIDE = 0.045
+
+
+def _get_timing_config() -> tuple[int, int, float]:
+    """Load timing config from settings (with module-level fallback)."""
+    try:
+        from polybot.config import get_settings
+        s = get_settings()
+        return (
+            s.timing_min_seconds_before_close,
+            s.timing_max_seconds_before_close,
+            s.timing_strong_edge_override,
+        )
+    except Exception:
+        return MIN_SECONDS_BEFORE_CLOSE, MAX_SECONDS_BEFORE_CLOSE, STRONG_EDGE_OVERRIDE
+
+
+def should_trade_this_slot(slug: str, edge: float = 0.0) -> bool:
+    """Advanced slot timing filter — only trade in the optimal window.
+
+    Returns True if we're in the sweet spot (last ~75 seconds) or if edge
+    is strong enough to override. Returns False if too early or too late.
+    """
+    min_sec, max_sec, strong_edge = _get_timing_config()
+    try:
+        ts = int(slug.split("-")[-1])
+        end_time = ts + SLOT_DURATION
+        seconds_left = end_time - time.time()
+
+        if seconds_left < max_sec:
+            return False  # too close to resolution
+
+        if seconds_left > min_sec:
+            return edge > strong_edge  # outside sweet spot
+
+        return True
+    except (ValueError, IndexError):
+        return False
+
+
+def get_seconds_until_close(slug: str) -> float:
+    """Get seconds remaining until slot closes. Returns -1 on parse error."""
+    try:
+        ts = int(slug.split("-")[-1])
+        return (ts + SLOT_DURATION) - time.time()
+    except (ValueError, IndexError):
+        return -1.0
+
+
 # Default endpoint (may be overridden by proxy manager mirrors)
 GAMMA_API = "https://gamma-api.polymarket.com"
 
@@ -85,6 +138,28 @@ CRYPTO_SYMBOL_MAP: dict[str, str] = {
     "xrp": "XRP/USDT",
     "dogecoin": "DOGE/USDT",
     "doge": "DOGE/USDT",
+    "hyperliquid": "HYPE/USDT",
+    "hype": "HYPE/USDT",
+}
+
+# ── Canonical slug prefix list (single source of truth) ────────────────
+TARGET_SLUG_PREFIXES: list[str] = [
+    "btc-updown-5m-",
+    "eth-updown-5m-",
+    "sol-updown-5m-",
+    "xrp-updown-5m-",
+    "hype-updown-5m-",
+    # optional: "doge-updown-5m-",
+]
+
+# Reverse mapping: slug prefix → normalized asset symbol
+ASSET_FROM_SLUG: dict[str, str] = {
+    "btc": "BTC",
+    "eth": "ETH",
+    "sol": "SOL",
+    "xrp": "XRP",
+    "hype": "HYPE",
+    "doge": "DOGE",
 }
 
 CATEGORY_KEYWORDS: dict[str, list[str]] = {
@@ -99,6 +174,8 @@ CATEGORY_KEYWORDS: dict[str, list[str]] = {
         "xrp",
         "dogecoin",
         "doge",
+        "hyperliquid",
+        "hype",
         "token",
         "defi",
         "blockchain",
@@ -326,6 +403,7 @@ _5MIN_ALLOWED_SLUGS: list[str] = [
     "eth-updown",
     "sol-updown",
     "xrp-updown",
+    "hype-updown",
     "5m",  # V10.3: Added broad 5m slug match (protected by coin check)
 ]
 
@@ -336,6 +414,8 @@ _5MIN_EXACT_TITLES: list[str] = [
     "ethereum up or down - 5 minutes",
     "solana up or down - 5 minutes",
     "xrp up or down - 5 minutes",
+    "hype up or down - 5 minutes",
+    "hyperliquid up or down - 5 minutes",
 ]
 
 # V10.6: Exact slugs for 5-minute markets (from Polymarket URLs)
@@ -345,6 +425,7 @@ _5MIN_EXACT_SLUGS: list[str] = [
     "eth-updown-5m-",
     "sol-updown-5m-",
     "xrp-updown-5m-",
+    "hype-updown-5m-",
 ]
 
 # V10.9: Dynamic matching constants – target coins, updown phrases, time keywords, slug patterns
@@ -357,6 +438,8 @@ _5MIN_TARGET_COINS: list[str] = [
     "solana",
     "sol",
     "xrp",
+    "hype",
+    "hyperliquid",
 ]
 _5MIN_UPDOWN_PHRASES: list[str] = [
     "up or down",
@@ -378,6 +461,7 @@ _5MIN_SLUG_PATTERNS: list[str] = [
     "eth-updown-5m",
     "sol-updown-5m",
     "xrp-updown-5m",
+    "hype-updown-5m",
     "5-minute",
 ]
 # V10.9: Keep core phrases for backward compat (used by FIVE_MIN_KEYWORDS)
@@ -639,17 +723,16 @@ async def fetch_all_active_markets_async(min_volume: float = 10_000) -> list[dic
     _TRADE_AMOUNT_USD = 30.0
 
     # Validate private key is available
-    pk = os.getenv("POLYMARKET_PRIVATE_KEY")
+    pk = os.getenv("POLYMARKET_PRIVATE_KEY", "").strip()
     if not pk or len(pk) < 40:
-        logger.critical("[STARTUP] POLYMARKET_PRIVATE_KEY missing or too short")
+        logger.critical("[STARTUP] POLYMARKET_PRIVATE_KEY missing or invalid")
         return []
 
-    # Ensure 0x prefix
+    # Ensure 0x prefix (in-memory only, don't mutate os.environ)
     if not pk.startswith("0x"):
         pk = "0x" + pk
-        os.environ["POLYMARKET_PRIVATE_KEY"] = pk
 
-    logger.info(f"[STARTUP] Private key OK (length={len(pk)})")
+    logger.info("[STARTUP] Private key validated ✓")
 
     # Start CEX signal engine (connects to Binance WebSockets)
     try:
@@ -665,12 +748,7 @@ async def fetch_all_active_markets_async(min_volume: float = 10_000) -> list[dic
         engine = None
 
     # === TIMESTAMP SLOT MATH ===
-    target_prefixes = [
-        "btc-updown-5m-",
-        "eth-updown-5m-",
-        "sol-updown-5m-",
-        "xrp-updown-5m-",
-    ]
+    target_prefixes = TARGET_SLUG_PREFIXES  # Use canonical list
 
     current_ts = int(time.time())
     slot = (current_ts // 300) * 300
@@ -723,13 +801,8 @@ async def fetch_all_active_markets_async(min_volume: float = 10_000) -> list[dic
     for m in filtered:
         slug = m.get("slug", "")
         if not any(
-            coin in slug
-            for coin in [
-                "btc-updown-5m",
-                "eth-updown-5m",
-                "sol-updown-5m",
-                "xrp-updown-5m",
-            ]
+            prefix.rstrip("-") in slug
+            for prefix in TARGET_SLUG_PREFIXES
         ):
             continue
 
@@ -771,6 +844,34 @@ async def fetch_all_active_markets_async(min_volume: float = 10_000) -> list[dic
                 best_ask = float(asks[0]["price"]) if asks else 0.5
                 best_bid = float(bids[0]["price"]) if bids else 0.5
                 up_price = (best_ask + best_bid) / 2
+                spread = best_ask - best_bid
+
+                # === SPREAD / SLIPPAGE PROTECTION ===
+                # Wide spreads near expiry indicate thin liquidity — edge gets eaten
+                MAX_SPREAD = 0.08  # 8 cents max spread
+                sec_left = get_seconds_until_close(slug)
+                # Tighter spread requirement in last 30 seconds (execution risk)
+                effective_max_spread = MAX_SPREAD if sec_left > 30 else 0.05
+
+                if spread > effective_max_spread:
+                    logger.info(
+                        "[SKIP:SPREAD] %s spread=%.3f > max=%.3f | sec_left=%.0f",
+                        slug, spread, effective_max_spread, sec_left,
+                    )
+                    continue
+
+                # Check book depth (sum of top 5 levels)
+                ask_depth = sum(float(a.get("size", 0)) for a in asks[:5])
+                bid_depth = sum(float(b.get("size", 0)) for b in bids[:5])
+                total_depth = ask_depth + bid_depth
+
+                MIN_DEPTH_USD = 50.0  # minimum $50 depth to avoid getting stuck
+                if total_depth < MIN_DEPTH_USD:
+                    logger.info(
+                        "[SKIP:DEPTH] %s depth=$%.0f < min=$%.0f",
+                        slug, total_depth, MIN_DEPTH_USD,
+                    )
+                    continue
 
                 # Skip resolved/expired markets
                 if up_price <= 0.02 or up_price >= 0.98:
@@ -783,8 +884,7 @@ async def fetch_all_active_markets_async(min_volume: float = 10_000) -> list[dic
 
                 # === CEX SIGNAL ENGINE ===
                 # Determine asset from slug (btc-updown-5m-... → BTC)
-                asset_map = {"btc": "BTC", "eth": "ETH", "sol": "SOL", "xrp": "XRP"}
-                asset = next((v for k, v in asset_map.items() if k in slug), None)
+                asset = next((v for k, v in ASSET_FROM_SLUG.items() if k in slug), None)
 
                 signal = None
                 if asset and engine is not None:
@@ -795,26 +895,102 @@ async def fetch_all_active_markets_async(min_volume: float = 10_000) -> list[dic
                             "[SIGNAL ENGINE] Error getting signal: %s", sig_err
                         )
 
-                if signal and signal.is_valid:
-                    side = signal.direction
-                    logger.info(
-                        "[SIGNAL ENGINE] %s → %s (conf=%.2f) reason=%s | PM_UP=$%.3f",
-                        asset,
-                        side.upper(),
-                        signal.confidence,
-                        signal.reason,
-                        up_price,
+                # === HYPERLIQUID SIGNAL (optional boost) ===
+                hype_signal = None
+                try:
+                    from polybot.hyperliquid_engine import get_hyperliquid_engine, is_hyperliquid_enabled
+                    from polybot.main_fastapi import _runtime_mode_override
+                    hype_active = is_hyperliquid_enabled() or _runtime_mode_override.get("sub") == "hype"
+                    if hype_active and asset:
+                        hype_engine = get_hyperliquid_engine()
+                        hype_signal = hype_engine.get_signal(asset, polymarket_up_price=up_price)
+                        if hype_signal and hype_signal.is_valid:
+                            logger.info(
+                                "[HYPE SIGNAL] %s → %s (conf=%.2f) reason=%s",
+                                asset, hype_signal.direction, hype_signal.confidence, hype_signal.reason,
+                            )
+                except (ImportError, AttributeError):
+                    hype_signal = None
+
+                # === STRATEGY-AWARE DIRECTION RESOLUTION ===
+                try:
+                    from polybot.mode_strategies import get_active_strategy, get_direction_for_signal, should_skip_by_hours
+                    strategy = get_active_strategy()
+
+                    # Skip if outside active hours for this strategy
+                    if should_skip_by_hours(strategy):
+                        logger.debug("[STRATEGY] %s skipped — outside active hours", strategy.label)
+                        continue
+
+                    binance_dir = signal.direction if signal and signal.is_valid else None
+                    binance_conf = signal.confidence if signal else 0.0
+                    hype_dir = hype_signal.direction if hype_signal and hype_signal.is_valid else None
+                    hype_conf = hype_signal.confidence if hype_signal else 0.0
+
+                    final_dir, final_conf = get_direction_for_signal(
+                        strategy,
+                        binance_direction=binance_dir,
+                        binance_confidence=binance_conf,
+                        hype_direction=hype_dir,
+                        hype_confidence=hype_conf,
+                        polymarket_up_price=up_price,
                     )
-                elif up_price < 0.45:
-                    side = "up"  # Price-based fallback
-                elif up_price > 0.55:
-                    side = "down"  # Price-based fallback
-                else:
-                    side = "up" if random.random() < 0.5 else "down"  # No edge → 50/50
+
+                    if final_dir is not None:
+                        side = final_dir
+                        logger.info(
+                            "[STRATEGY] %s → %s (conf=%.2f) | PM_UP=$%.3f",
+                            strategy.label, side.upper(), final_conf, up_price,
+                        )
+                    elif up_price < 0.45:
+                        side = "up"
+                    elif up_price > 0.55:
+                        side = "down"
+                    else:
+                        side = "up" if random.random() < 0.5 else "down"
+
+                except (ImportError, AttributeError):
+                    # Fallback if mode_strategies not available
+                    if signal and signal.is_valid:
+                        side = signal.direction
+                        logger.info(
+                            "[SIGNAL ENGINE] %s → %s (conf=%.2f) reason=%s | PM_UP=$%.3f",
+                            asset, side.upper(), signal.confidence, signal.reason, up_price,
+                        )
+                    elif up_price < 0.45:
+                        side = "up"
+                    elif up_price > 0.55:
+                        side = "down"
+                    else:
+                        side = "up" if random.random() < 0.5 else "down"
 
             except Exception:
                 side = "up" if random.random() < 0.5 else "down"
+
+            # === COMPUTE TRADE EDGE for timing/sizing ===
+            # Edge = how far our confidence is above 50% (coin-flip baseline)
+            try:
+                trade_conf = final_conf if final_conf else 0.5
+            except NameError:
+                trade_conf = 0.5
+            trade_edge = max(trade_conf - 0.5, 0.0)
+
+            # === TIMING FILTER: Only trade in optimal window ===
+            sec_left = get_seconds_until_close(slug)
+            if not should_trade_this_slot(slug, edge=trade_edge):
+                logger.info(
+                    "[DECISION:SKIP:TIMING] %s → %s | sec_left=%.0f edge=%.3f (outside sweet spot)",
+                    slug, side.upper(), sec_left, trade_edge,
+                )
+                continue
+
             token_id = clob_ids[0] if side == "up" else clob_ids[1]
+
+            # === COMPREHENSIVE DECISION LOG ===
+            logger.info(
+                "[DECISION:TRADE] %s → %s | edge=%.3f conf=%.2f spread=%.3f depth=$%.0f sec_left=%.0f",
+                slug, side.upper(), trade_edge, trade_conf, spread, total_depth, sec_left,
+            )
 
             result = await executor.place_trade_async(
                 market=m,
@@ -831,10 +1007,9 @@ async def fetch_all_active_markets_async(min_volume: float = 10_000) -> list[dic
                 logger.error(f"[TRADE FAILED] {slug} result was None")
 
         except Exception as e:
-            import traceback
-
             logger.error(f"[TRADE ERROR] {slug}: {type(e).__name__} - {str(e)[:400]}")
-            logger.error(f"[FULL TRACEBACK]\n{traceback.format_exc()}")
+            # Note: full traceback omitted to prevent potential secret leakage
+            logger.debug("[TRADE ERROR] See structured logs for details", exc_info=True)
             continue
 
         # === BUG-2 FIX: Refresh balance after each trade, stop when broke ===
